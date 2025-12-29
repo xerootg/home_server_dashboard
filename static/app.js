@@ -1389,7 +1389,17 @@ function serviceMatchesTableSearch(service) {
         service.status || '',
         service.state || '',
         service.image || '',
-        service.source || ''
+        service.source || '',
+        // Include ports for searching by port number
+        ...(service.ports || []).map(p => String(p.host_port)),
+        // Include traefik URLs for searching by hostname
+        ...(service.traefik_urls || []).map(url => {
+            try {
+                return new URL(url).hostname;
+            } catch (e) {
+                return url;
+            }
+        })
     ].join(' ');
     
     return tableTextMatches(searchableText, tableSearchTerm);

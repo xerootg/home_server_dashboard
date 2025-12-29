@@ -640,7 +640,17 @@ function serviceMatchesTableSearch(service, searchTerm) {
         service.status || '',
         service.state || '',
         service.image || '',
-        service.source || ''
+        service.source || '',
+        // Include ports for searching by port number
+        ...(service.ports || []).map(p => String(p.host_port)),
+        // Include traefik URLs for searching by hostname
+        ...(service.traefik_urls || []).map(url => {
+            try {
+                return new URL(url).hostname;
+            } catch (e) {
+                return url;
+            }
+        })
     ].join(' ');
     
     return tableTextMatches(searchableText, searchTerm);
@@ -804,7 +814,15 @@ describe('Table Search - Service Matching', () => {
         status: 'running (healthy)',
         state: 'running',
         image: 'nginx:1.25-alpine',
-        source: 'docker'
+        source: 'docker',
+        ports: [
+            { host_port: 8080, container_port: 80, protocol: 'tcp' },
+            { host_port: 8443, container_port: 443, protocol: 'tcp' }
+        ],
+        traefik_urls: [
+            'https://nginx.example.com',
+            'https://web.mysite.org'
+        ]
     };
 
     test('matches service name', () => {
@@ -845,6 +863,24 @@ describe('Table Search - Service Matching', () => {
     test('matches source', () => {
         resetTableSearchState();
         assertEqual(serviceMatchesTableSearch(sampleService, 'docker'), true);
+    });
+
+    test('matches port number', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, '8080'), true);
+        assertEqual(serviceMatchesTableSearch(sampleService, '8443'), true);
+    });
+
+    test('matches traefik hostname', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'nginx.example.com'), true);
+        assertEqual(serviceMatchesTableSearch(sampleService, 'web.mysite.org'), true);
+    });
+
+    test('matches partial traefik hostname', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'example.com'), true);
+        assertEqual(serviceMatchesTableSearch(sampleService, 'mysite'), true);
     });
 
     test('no match returns false', () => {
