@@ -11,7 +11,11 @@
             ],
             "docker_compose_roots": [
                 "/some/folder/"
-            ]
+            ],
+            "traefik": {
+                "enabled": true,
+                "api_port": 8080
+            }
         },
         {
             "name": "anotherhost",
@@ -20,7 +24,11 @@
                 "docker.service",
                 "ollama.service"
             ],
-            "docker_compose_roots": []
+            "docker_compose_roots": [],
+            "traefik": {
+                "enabled": false,
+                "api_port": 8080
+            }
         }
     ]
 }

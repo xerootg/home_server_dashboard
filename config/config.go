@@ -11,13 +11,22 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+// TraefikConfig holds Traefik API connection settings for a host.
+type TraefikConfig struct {
+	// Enabled determines whether to query Traefik for this host.
+	Enabled bool `json:"enabled"`
+	// APIPort is the port where Traefik API is listening (default 8080).
+	APIPort int `json:"api_port"`
+}
+
 // HostConfig represents a single host's configuration.
 type HostConfig struct {
-	Name               string   `json:"name"`
-	Address            string   `json:"address"`
-	NIC                []string `json:"nic"`
-	SystemdServices    []string `json:"systemd_services"`
-	DockerComposeRoots []string `json:"docker_compose_roots"`
+	Name               string        `json:"name"`
+	Address            string        `json:"address"`
+	NIC                []string      `json:"nic"`
+	SystemdServices    []string      `json:"systemd_services"`
+	DockerComposeRoots []string      `json:"docker_compose_roots"`
+	Traefik            TraefikConfig `json:"traefik"`
 }
 
 // IsLocal returns true if this host is the local machine.

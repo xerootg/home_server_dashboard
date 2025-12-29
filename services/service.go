@@ -25,6 +25,7 @@ type ServiceInfo struct {
 	Host          string     `json:"host"`           // Host name from config
 	HostIP        string     `json:"host_ip"`        // Private IP address for port links
 	Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
+	TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
 }
 
 // LogStreamer provides a stream of log data.

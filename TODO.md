@@ -14,7 +14,9 @@
 | service type (systemd/docker) should be filterable | ✅ Done |
 | BangAndPipe search should apply to services rendered in the table of services | ✅ Done |
 | If the service exposes ports, not to localhost, but to any IP, I want a list of those after the service name, which on click opens that port as HTTP | ✅ Done |
-| determine if a service is exposed in traefik. if it is, add another link to the hostname at which the service is bound | |
+| determine if a service is exposed in traefik. if it is, add another link to the hostname at which the service is bound | ✅ Done |
+| fetch and render a description for a service from docker tags (home.server.dashboard.description) or systemd metadata (the unit file has a description field) |  |
+| support getting status of services registered in traefik but not in systemd/docker |  |
 | allow filtering and labeling of ports in the UI via docker labels. systemd does not expose ports, maybe later. |  |
 | Write a systemd unit for this service and start it when the server starts. include a script to compile and install this binary, as well as uninstall. the config path should be configurable, and /etc/nas_dashboard/services.json should be the default path, with sample.services.json copied into that folder | ⬜ |
 | all services rendered should have a start/stop/restart button. on docker, restart should down/up and not simply do a restart | ⬜ |

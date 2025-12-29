@@ -21,6 +21,7 @@ import (
 	"home_server_dashboard/services"
 	"home_server_dashboard/services/docker"
 	"home_server_dashboard/services/systemd"
+	"home_server_dashboard/services/traefik"
 )
 
 // getAllServices collects services from all configured providers.
@@ -71,7 +72,80 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		allServices = append(allServices, systemdServices...)
 	}
 
+	// Enrich services with Traefik hostnames
+	allServices = enrichWithTraefikURLs(ctx, cfg, allServices)
+
 	return allServices, nil
+}
+
+// enrichWithTraefikURLs adds Traefik-exposed URLs to services.
+// It queries each host's Traefik API for router information and matches
+// services by their name.
+func enrichWithTraefikURLs(ctx context.Context, cfg *config.Config, svcList []services.ServiceInfo) []services.ServiceInfo {
+	// Collect service->hostname mappings from all hosts with Traefik enabled
+	// Key: service name, Value: list of hostnames
+	traefikMappings := make(map[string][]string)
+
+	for _, host := range cfg.Hosts {
+		if !host.Traefik.Enabled {
+			continue
+		}
+
+		client := traefik.NewClient(host.Name, host.Address, host.Traefik.APIPort)
+		defer client.Close()
+
+		mappings, err := client.GetServiceHostMappings(ctx)
+		if err != nil {
+			log.Printf("Warning: failed to get Traefik mappings from %s: %v", host.Name, err)
+			continue
+		}
+
+		// Merge mappings (a service could be exposed via multiple hosts/routers)
+		for svcName, hostnames := range mappings {
+			existing := traefikMappings[svcName]
+			for _, h := range hostnames {
+				// Avoid duplicates
+				found := false
+				for _, e := range existing {
+					if e == h {
+						found = true
+						break
+					}
+				}
+				if !found {
+					existing = append(existing, h)
+				}
+			}
+			traefikMappings[svcName] = existing
+		}
+	}
+
+	// Apply Traefik URLs to services
+	for i := range svcList {
+		svc := &svcList[i]
+
+		// Try to match by service name (the Name field is the service name for Docker Compose)
+		hostnames := traefikMappings[svc.Name]
+
+		// Traefik often names services as "servicename-projectname", so try that pattern
+		if len(hostnames) == 0 && svc.Project != "" && svc.Project != "systemd" {
+			traefikServiceName := svc.Name + "-" + svc.Project
+			hostnames = traefikMappings[traefikServiceName]
+		}
+
+		// Also try with container name for containers that might use that
+		if len(hostnames) == 0 && svc.ContainerName != "" {
+			hostnames = traefikMappings[svc.ContainerName]
+		}
+
+		// Convert hostnames to full URLs (https by default since Traefik usually terminates TLS)
+		for _, hostname := range hostnames {
+			url := "https://" + hostname
+			svc.TraefikURLs = append(svc.TraefikURLs, url)
+		}
+	}
+
+	return svcList
 }
 
 // ServicesHandler handles GET /api/services requests.

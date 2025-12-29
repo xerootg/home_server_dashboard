@@ -34,10 +34,13 @@ home_server_dashboard/
 │   │   ├── docker.go              # Docker provider and service implementation
 │   │   ├── docker_test.go         # Unit tests (mocked, no Docker required)
 │   │   └── docker_integration_test.go  # Integration tests (requires Docker)
-│   └── systemd/
-│       ├── systemd.go             # Systemd provider and service implementation
-│       ├── systemd_test.go        # Unit tests (mocked, no D-Bus required)
-│       └── systemd_integration_test.go # Integration tests (requires systemd)
+│   ├── systemd/
+│   │   ├── systemd.go             # Systemd provider and service implementation
+│   │   ├── systemd_test.go        # Unit tests (mocked, no D-Bus required)
+│   │   └── systemd_integration_test.go # Integration tests (requires systemd)
+│   └── traefik/
+│       ├── traefik.go             # Traefik API client for hostname lookup
+│       └── traefik_test.go        # Unit tests for Traefik client
 ├── static/
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
@@ -125,6 +128,23 @@ home_server_dashboard/
   - Uses D-Bus for localhost, SSH for remote hosts
   - Streams logs via journalctl
 
+### `services/traefik` Package
+- **Purpose:** Traefik API client for hostname discovery
+- **Key Types:**
+  - `Config` — Traefik API connection settings (Enabled, APIPort)
+  - `Client` — HTTP client for querying Traefik API
+  - `Router` — Represents a Traefik HTTP router
+- **Key Functions:**
+  - `NewClient()` — Creates a new Traefik API client
+  - `GetRouters()` — Fetches all HTTP routers from Traefik API
+  - `GetServiceHostMappings()` — Returns map of service names to hostnames
+  - `ExtractHostnames()` — Parses Host() matchers from Traefik rules
+- **Features:**
+  - Queries Traefik REST API at `/api/http/routers`
+  - Extracts hostnames from `Host()` rule matchers
+  - Supports SSH tunneling for remote Traefik instances
+  - Matches services by normalized name (strips `@provider` suffix)
+
 ## Configuration (services.json)
 
 Defines which hosts and services to monitor. Supports JSON with comments (`//`, `/* */`) and trailing commas via [hujson](https://github.com/tailscale/hujson). **The service will fail to start if the config file cannot be parsed.**
@@ -137,7 +157,11 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
       "address": "localhost",           // "localhost" uses D-Bus, others use SSH
       "nic": ["ens10"],                 // NIC names to resolve private IP for port links
       "systemd_services": ["docker.service"],
-      "docker_compose_roots": ["/home/xero/nas/"]
+      "docker_compose_roots": ["/home/xero/nas/"],
+      "traefik": {
+        "enabled": true,                // Enable Traefik hostname lookup
+        "api_port": 8080                // Traefik API port (default 8080)
+      }
     },
     {
       // another host
@@ -196,6 +220,7 @@ type ServiceInfo struct {
     Host          string     `json:"host"`           // Host name from config
     HostIP        string     `json:"host_ip"`        // Private IP address for port links
     Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
+    TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
 }
 ```
 
@@ -241,6 +266,7 @@ type Service interface {
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
 - **Port links**: Clickable badges after service name showing exposed ports (non-localhost only), opens HTTP URL on click
+- **Traefik links**: Green clickable badges showing Traefik-exposed hostnames, opens HTTPS URL on click
 - **Table search**: VS Code-style search widget below filter cards
   - Filters across all columns (name, project, host, container, status, image, source)
   - Supports plain text, regex (with `!` prefix for inverse), and Bang & Pipe mode
@@ -311,4 +337,5 @@ JavaScript tests cover the client-side search functionality:
 | services | ✅ | — |
 | services/docker | ✅ | ✅ |
 | services/systemd | ✅ | ✅ |
+| services/traefik | ✅ | — |
 | tests/js | ✅ (Node.js) | — |

@@ -11,12 +11,14 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 - Real-time log streaming via Server-Sent Events
 - Dark theme web interface with sorting and filtering
 - Bang & Pipe query language for advanced filtering - [readme on that](docs/bangandpipe-query-language.md)
+- Traefik integration for displaying exposed hostnames
 
 ## Requirements
 
 - Go 1.21 or later
 - Docker (for container monitoring)
 - SSH access to remote hosts (for remote systemd monitoring)
+- Traefik with API enabled (optional, for hostname discovery)
 
 ## Quick Start
 
@@ -57,6 +59,27 @@ The dashboard queries Docker containers via the Docker socket and systemd units 
 ## Configuration
 
 Set `address` to `localhost` to use D-Bus for systemd queries. Any other address will use SSH with your default SSH key.
+
+### Traefik Integration
+
+To display Traefik-exposed hostnames as clickable links next to services, enable Traefik in your host configuration:
+
+```json
+{
+  "hosts": [
+    {
+      "name": "myserver",
+      "address": "localhost",
+      "traefik": {
+        "enabled": true,
+        "api_port": 8080
+      }
+    }
+  ]
+}
+```
+
+The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
 
 ## License
 

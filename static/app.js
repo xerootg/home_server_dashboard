@@ -57,6 +57,22 @@ function renderPorts(ports, hostIP) {
     }).join('');
 }
 
+function renderTraefikURLs(traefikURLs) {
+    if (!traefikURLs || traefikURLs.length === 0) {
+        return '';
+    }
+    return traefikURLs.map(url => {
+        // Extract hostname from URL for display
+        let hostname;
+        try {
+            hostname = new URL(url).hostname;
+        } catch (e) {
+            hostname = url;
+        }
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="traefik-link badge bg-success text-white me-1" onclick="event.stopPropagation();" title="Traefik: ${escapeHtml(hostname)}">${escapeHtml(hostname)}</a>`;
+    }).join('');
+}
+
 function renderServices(services, updateStats = true) {
     // Close any open logs first
     closeLogs();
@@ -93,10 +109,11 @@ function renderServices(services, updateStats = true) {
         const sourceIcon = service.source === 'systemd' ? '<i class="bi bi-gear-fill text-info" title="systemd"></i>' : '<i class="bi bi-box text-primary" title="Docker"></i>';
         const hostBadge = service.host ? `<span class="badge bg-secondary">${escapeHtml(service.host)}</span>` : '';
         const portsHtml = renderPorts(service.ports, service.host_ip);
+        const traefikHtml = renderTraefikURLs(service.traefik_urls);
 
         return `
             <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}">
-                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml}</td>
+                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}</td>
                 <td>${escapeHtml(service.project)}</td>
                 <td>${hostBadge}</td>
                 <td><code class="small">${escapeHtml(service.container_name)}</code></td>
