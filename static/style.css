@@ -1,0 +1,226 @@
+/* Custom dark theme overrides for Bootstrap */
+body {
+    background: #1a1a2e;
+    min-height: 100vh;
+}
+
+/* Stats cards */
+.stat-card {
+    min-width: 140px;
+    background: #16213e;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s, border 0.2s;
+    border: 2px solid transparent;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.stat-card.active {
+    border: 2px solid #0d6efd;
+    box-shadow: 0 0 12px rgba(13, 110, 253, 0.4);
+}
+
+.stat-card[data-filter="running"].active {
+    border-color: #2ecc71;
+    box-shadow: 0 0 12px rgba(46, 204, 113, 0.4);
+}
+
+.stat-card[data-filter="stopped"].active {
+    border-color: #e74c3c;
+    box-shadow: 0 0 12px rgba(231, 76, 60, 0.4);
+}
+
+.stat-card .card-body {
+    padding: 1rem 2rem;
+}
+
+/* Sortable table headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+th.sortable:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sort-indicator {
+    font-size: 0.75em;
+    margin-left: 0.25em;
+}
+
+/* Table styling */
+.card {
+    background: #16213e;
+    border: none;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.table {
+    --bs-table-bg: #16213e;
+    --bs-table-color: #eee;
+    --bs-table-border-color: #0f3460;
+    --bs-table-striped-bg: #1a2848;
+    --bs-table-hover-bg: #1a3050;
+    margin-bottom: 0;
+}
+
+.table thead.table-dark {
+    --bs-table-bg: #0f3460;
+}
+
+.table tbody tr {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.table tbody tr.selected {
+    --bs-table-bg-state: #0f3460;
+}
+
+/* Status badges */
+.badge-running {
+    background: rgba(46, 204, 113, 0.2) !important;
+    color: #2ecc71 !important;
+}
+
+.badge-running::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2ecc71;
+    box-shadow: 0 0 8px #2ecc71;
+    margin-right: 6px;
+}
+
+.badge-unhealthy {
+    background: rgba(243, 156, 18, 0.2) !important;
+    color: #f39c12 !important;
+}
+
+.badge-unhealthy::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f39c12;
+    box-shadow: 0 0 8px #f39c12;
+    margin-right: 6px;
+}
+
+.badge-stopped {
+    background: rgba(231, 76, 60, 0.2) !important;
+    color: #e74c3c !important;
+}
+
+.badge-stopped::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e74c3c;
+    box-shadow: 0 0 8px #e74c3c;
+    margin-right: 6px;
+}
+
+/* Image column */
+.image-cell {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85em;
+    color: #888;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Inline Logs Row */
+.logs-row td {
+    padding: 0 !important;
+    background: #0d1117 !important;
+}
+
+.logs-inline {
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    margin: 8px;
+    overflow: hidden;
+}
+
+.logs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+}
+
+.logs-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 0.9em;
+}
+
+.logs-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logs-content {
+    height: 300px;
+    overflow-y: auto;
+    padding: 10px 15px;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #0d1117;
+}
+
+.logs-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.logs-content::-webkit-scrollbar-track {
+    background: #0d1117;
+}
+
+.logs-content::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 4px;
+}
+
+.log-line {
+    padding: 1px 0;
+    color: #c9d1d9;
+}
+
+.log-line:hover {
+    background: #161b22;
+}
+
+.logs-status {
+    font-size: 0.8em;
+    color: #8b949e;
+}
+
+.logs-status.connected {
+    color: #2ecc71;
+}
+
+.logs-status.error {
+    color: #e74c3c;
+}

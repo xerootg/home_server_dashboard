@@ -1,0 +1,23 @@
+{
+    "hosts": [
+        {
+            "name": "nas",
+            "address": "localhost",
+            "systemd_services": [
+                "docker.service"
+            ],
+            "docker_compose_roots": [
+                "/some/folder/"
+            ]
+        },
+        {
+            "name": "anotherhost",
+            "address": "192.168.1.9",
+            "systemd_services": [
+                "docker.service",
+                "ollama.service"
+            ],
+            "docker_compose_roots": []
+        }
+    ]
+}
