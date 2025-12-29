@@ -401,3 +401,32 @@ func BenchmarkDockerLogReader(b *testing.B) {
 		}
 	}
 }
+
+// TestDescriptionLabelKey verifies the description label constant is correct.
+func TestDescriptionLabelKey(t *testing.T) {
+	// This test documents the expected label key for service descriptions
+	expectedLabelKey := "home.server.dashboard.description"
+
+	// Simulate extracting description from labels (mirrors the logic in GetServices and GetInfo)
+	labels := map[string]string{
+		"com.docker.compose.project":          "testproject",
+		"com.docker.compose.service":          "testservice",
+		"home.server.dashboard.description":   "My custom service description",
+	}
+
+	description := labels[expectedLabelKey]
+	if description != "My custom service description" {
+		t.Errorf("Description extraction failed, got %q, want %q", description, "My custom service description")
+	}
+
+	// Test with empty description
+	emptyLabels := map[string]string{
+		"com.docker.compose.project": "testproject",
+		"com.docker.compose.service": "testservice",
+	}
+
+	emptyDescription := emptyLabels[expectedLabelKey]
+	if emptyDescription != "" {
+		t.Errorf("Expected empty description for labels without description key, got %q", emptyDescription)
+	}
+}

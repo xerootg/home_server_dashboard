@@ -75,6 +75,9 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 		// Extract non-localhost exposed ports
 		ports := extractExposedPorts(ctr.Ports)
 
+		// Extract custom description from label
+		description := ctr.Labels["home.server.dashboard.description"]
+
 		result = append(result, services.ServiceInfo{
 			Name:          service,
 			Project:       project,
@@ -85,6 +88,7 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 			Source:        "docker",
 			Host:          p.hostName,
 			Ports:         ports,
+			Description:   description,
 		})
 	}
 
@@ -175,6 +179,9 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 	// Extract non-localhost exposed ports from network settings
 	ports := extractPortsFromInspect(inspect.NetworkSettings)
 
+	// Extract custom description from label
+	description := inspect.Config.Labels["home.server.dashboard.description"]
+
 	return services.ServiceInfo{
 		Name:          service,
 		Project:       project,
@@ -185,6 +192,7 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 		Source:        "docker",
 		Host:          s.hostName,
 		Ports:         ports,
+		Description:   description,
 	}, nil
 }
 

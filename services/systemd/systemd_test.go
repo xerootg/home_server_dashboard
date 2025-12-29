@@ -188,57 +188,78 @@ func TestJournalReader(t *testing.T) {
 func TestParseSystemctlOutput(t *testing.T) {
 	// This tests the parsing logic used in getRemoteUnitInfo
 	tests := []struct {
-		name          string
-		output        string
-		wantActive    string
-		wantSub       string
-		wantLoad      string
-		wantState     string
+		name               string
+		output             string
+		wantActive         string
+		wantSub            string
+		wantLoad           string
+		wantState          string
 		wantStatusContains string
+		wantDescription    string
 	}{
 		{
 			name: "running service",
 			output: `ActiveState=active
 SubState=running
-LoadState=loaded`,
-			wantActive:    "active",
-			wantSub:       "running",
-			wantLoad:      "loaded",
-			wantState:     "running",
+LoadState=loaded
+Description=Docker Application Container Engine`,
+			wantActive:         "active",
+			wantSub:            "running",
+			wantLoad:           "loaded",
+			wantState:          "running",
 			wantStatusContains: "active",
+			wantDescription:    "Docker Application Container Engine",
 		},
 		{
 			name: "stopped service",
 			output: `ActiveState=inactive
 SubState=dead
-LoadState=loaded`,
-			wantActive:    "inactive",
-			wantSub:       "dead",
-			wantLoad:      "loaded",
-			wantState:     "stopped",
+LoadState=loaded
+Description=OpenSSH Server`,
+			wantActive:         "inactive",
+			wantSub:            "dead",
+			wantLoad:           "loaded",
+			wantState:          "stopped",
 			wantStatusContains: "inactive",
+			wantDescription:    "OpenSSH Server",
 		},
 		{
 			name: "failed service",
 			output: `ActiveState=failed
 SubState=failed
-LoadState=loaded`,
-			wantActive:    "failed",
-			wantSub:       "failed",
-			wantLoad:      "loaded",
-			wantState:     "stopped",
+LoadState=loaded
+Description=My Custom Service`,
+			wantActive:         "failed",
+			wantSub:            "failed",
+			wantLoad:           "loaded",
+			wantState:          "stopped",
 			wantStatusContains: "failed",
+			wantDescription:    "My Custom Service",
 		},
 		{
 			name: "not found service",
 			output: `ActiveState=inactive
 SubState=dead
-LoadState=not-found`,
-			wantActive:    "inactive",
-			wantSub:       "dead",
-			wantLoad:      "not-found",
-			wantState:     "stopped",
+LoadState=not-found
+Description=nginx.service`,
+			wantActive:         "inactive",
+			wantSub:            "dead",
+			wantLoad:           "not-found",
+			wantState:          "stopped",
 			wantStatusContains: "not found",
+			wantDescription:    "nginx.service",
+		},
+		{
+			name: "service with no description",
+			output: `ActiveState=active
+SubState=running
+LoadState=loaded`,
+			wantActive:         "active",
+			wantSub:            "running",
+			wantLoad:           "loaded",
+			wantState:          "running",
+			wantStatusContains: "active",
+			wantDescription:    "",
 		},
 	}
 
@@ -256,6 +277,7 @@ LoadState=not-found`,
 			activeState := props["ActiveState"]
 			subState := props["SubState"]
 			loadState := props["LoadState"]
+			description := props["Description"]
 
 			if activeState != tt.wantActive {
 				t.Errorf("ActiveState = %v, want %v", activeState, tt.wantActive)
@@ -265,6 +287,9 @@ LoadState=not-found`,
 			}
 			if loadState != tt.wantLoad {
 				t.Errorf("LoadState = %v, want %v", loadState, tt.wantLoad)
+			}
+			if description != tt.wantDescription {
+				t.Errorf("Description = %v, want %v", description, tt.wantDescription)
 			}
 
 			// Check state mapping

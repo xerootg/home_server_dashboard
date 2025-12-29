@@ -78,6 +78,9 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 
 		status := fmt.Sprintf("%s (%s)", unit.ActiveState, unit.SubState)
 
+		// Get unit description from D-Bus
+		description := p.getLocalUnitDescription(ctx, conn, unit.Name)
+
 		result = append(result, services.ServiceInfo{
 			Name:          unit.Name,
 			Project:       "systemd",
@@ -87,6 +90,7 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 			Image:         "-",
 			Source:        "systemd",
 			Host:          p.hostName,
+			Description:   description,
 		})
 
 		// Remove from desired units to track what we found
@@ -134,6 +138,9 @@ func (p *Provider) getLocalUnitInfo(ctx context.Context, conn *dbus.Conn, unitNa
 		subState = strings.Trim(subProp.Value.String(), "\"")
 	}
 
+	// Get unit description
+	description := p.getLocalUnitDescription(ctx, conn, unitName)
+
 	return services.ServiceInfo{
 		Name:          unitName,
 		Project:       "systemd",
@@ -143,7 +150,17 @@ func (p *Provider) getLocalUnitInfo(ctx context.Context, conn *dbus.Conn, unitNa
 		Image:         "-",
 		Source:        "systemd",
 		Host:          p.hostName,
+		Description:   description,
 	}, nil
+}
+
+// getLocalUnitDescription gets the description for a unit via D-Bus.
+func (p *Provider) getLocalUnitDescription(ctx context.Context, conn *dbus.Conn, unitName string) string {
+	prop, err := conn.GetUnitPropertyContext(ctx, unitName, "Description")
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(prop.Value.String(), "\"")
 }
 
 // getRemoteServices queries systemd services on a remote host via SSH.
@@ -174,7 +191,7 @@ func (p *Provider) getRemoteServices(ctx context.Context) ([]services.ServiceInf
 // getRemoteUnitInfo gets info for a single unit via SSH.
 func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (services.ServiceInfo, error) {
 	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-		p.address, "systemctl", "show", unitName, "--property=ActiveState,SubState,LoadState")
+		p.address, "systemctl", "show", unitName, "--property=ActiveState,SubState,LoadState,Description")
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -193,6 +210,7 @@ func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (serv
 	activeState := props["ActiveState"]
 	subState := props["SubState"]
 	loadState := props["LoadState"]
+	description := props["Description"]
 
 	state := "stopped"
 	if activeState == "active" {
@@ -213,6 +231,7 @@ func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (serv
 		Image:         "-",
 		Source:        "systemd",
 		Host:          p.hostName,
+		Description:   description,
 	}, nil
 }
 
@@ -271,6 +290,13 @@ func (s *SystemdService) GetInfo(ctx context.Context) (services.ServiceInfo, err
 			subState = strings.Trim(subProp.Value.String(), "\"")
 		}
 
+		// Get unit description
+		description := ""
+		descProp, _ := conn.GetUnitPropertyContext(ctx, s.unitName, "Description")
+		if descProp != nil {
+			description = strings.Trim(descProp.Value.String(), "\"")
+		}
+
 		return services.ServiceInfo{
 			Name:          s.unitName,
 			Project:       "systemd",
@@ -280,6 +306,7 @@ func (s *SystemdService) GetInfo(ctx context.Context) (services.ServiceInfo, err
 			Image:         "-",
 			Source:        "systemd",
 			Host:          s.hostName,
+			Description:   description,
 		}, nil
 	}
 

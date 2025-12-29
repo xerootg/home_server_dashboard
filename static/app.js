@@ -110,10 +110,11 @@ function renderServices(services, updateStats = true) {
         const hostBadge = service.host ? `<span class="badge bg-secondary">${escapeHtml(service.host)}</span>` : '';
         const portsHtml = renderPorts(service.ports, service.host_ip);
         const traefikHtml = renderTraefikURLs(service.traefik_urls);
+        const descriptionHtml = service.description ? `<div class="service-description text-muted small">${escapeHtml(service.description)}</div>` : '';
 
         return `
             <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}">
-                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}</td>
+                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}${descriptionHtml}</td>
                 <td>${escapeHtml(service.project)}</td>
                 <td>${hostBadge}</td>
                 <td><code class="small">${escapeHtml(service.container_name)}</code></td>

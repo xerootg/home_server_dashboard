@@ -81,6 +81,20 @@ To display Traefik-exposed hostnames as clickable links next to services, enable
 
 The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
 
+### Service Descriptions
+
+The dashboard displays descriptions for services when available:
+
+- **Docker**: Add a `home.server.dashboard.description` label to your container in `docker-compose.yml`:
+  ```yaml
+  services:
+    myapp:
+      labels:
+        - "home.server.dashboard.description=My application description"
+  ```
+
+- **Systemd**: Descriptions are automatically fetched from the unit's `Description` field.
+
 ## License
 
 GPLv3

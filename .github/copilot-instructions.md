@@ -221,6 +221,7 @@ type ServiceInfo struct {
     HostIP        string     `json:"host_ip"`        // Private IP address for port links
     Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
     TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
+    Description   string     `json:"description"`    // Service description (from Docker label or systemd unit)
 }
 ```
 
@@ -241,11 +242,13 @@ type Service interface {
 **Docker Integration (`services/docker/docker.go`):**
 - Queries containers via Docker socket on localhost
 - Filters by `com.docker.compose.project` and `com.docker.compose.service` labels
+- Extracts custom description from `home.server.dashboard.description` label
 - Streams logs using `ContainerLogs()` with multiplexed stdout/stderr
 
 **Systemd Integration (`services/systemd/systemd.go`):**
 - Local: Uses D-Bus via `dbus.NewSystemConnectionContext()` and `ListUnitsContext()`
-- Remote: Uses SSH to run `systemctl show <unit> --property=ActiveState,SubState,LoadState`
+- Remote: Uses SSH to run `systemctl show <unit> --property=ActiveState,SubState,LoadState,Description`
+- Fetches unit description from systemd's `Description` property
 - Filters units by exact name match from config
 
 ## Frontend
@@ -267,6 +270,7 @@ type Service interface {
 - Host badges showing which host the service runs on
 - **Port links**: Clickable badges after service name showing exposed ports (non-localhost only), opens HTTP URL on click
 - **Traefik links**: Green clickable badges showing Traefik-exposed hostnames, opens HTTPS URL on click
+- **Service descriptions**: Muted text below service name showing description (from Docker label `home.server.dashboard.description` or systemd unit description)
 - **Table search**: VS Code-style search widget below filter cards
   - Filters across all columns (name, project, host, container, status, image, source)
   - Supports plain text, regex (with `!` prefix for inverse), and Bang & Pipe mode

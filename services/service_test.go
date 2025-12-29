@@ -22,6 +22,7 @@ func TestServiceInfo_JSONSerialization(t *testing.T) {
 			{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
 			{HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
 		},
+		Description: "Web server for webstack project",
 	}
 
 	// Serialize to JSON
@@ -65,6 +66,9 @@ func TestServiceInfo_JSONSerialization(t *testing.T) {
 	if decoded.HostIP != info.HostIP {
 		t.Errorf("HostIP = %v, want %v", decoded.HostIP, info.HostIP)
 	}
+	if decoded.Description != info.Description {
+		t.Errorf("Description = %v, want %v", decoded.Description, info.Description)
+	}
 	// Verify Ports
 	if len(decoded.Ports) != len(info.Ports) {
 		t.Errorf("Ports length = %v, want %v", len(decoded.Ports), len(info.Ports))
@@ -97,6 +101,7 @@ func TestServiceInfo_JSONFieldNames(t *testing.T) {
 		Ports: []PortInfo{
 			{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
 		},
+		Description: "Test service description",
 	}
 
 	data, err := json.Marshal(info)
@@ -120,6 +125,7 @@ func TestServiceInfo_JSONFieldNames(t *testing.T) {
 		`"host_port"`,
 		`"container_port"`,
 		`"protocol"`,
+		`"description"`,
 	}
 
 	for _, field := range expectedFields {

@@ -26,6 +26,7 @@ type ServiceInfo struct {
 	HostIP        string     `json:"host_ip"`        // Private IP address for port links
 	Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
 	TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
+	Description   string     `json:"description"`    // Service description (from Docker label or systemd unit)
 }
 
 // LogStreamer provides a stream of log data.
