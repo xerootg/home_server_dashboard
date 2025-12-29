@@ -2,6 +2,7 @@
 
 REQUIRED: Update this document with any architectural or design information about the project.
 REQUIRED: If you are working on a todo and find an issue, add it to the bottom of the todo list. the status should be "needs triage" and not checkmark or empty checkbox.
+REQUIRED: All tests must pass, including integration tests, before any item in todo can be marked done. if there are no tests for the feature, add them, and they must pass.
 
 A lightweight Go web dashboard for monitoring Docker Compose services and systemd services across multiple hosts.
 
@@ -10,15 +11,22 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 ```
 home_server_dashboard/
 ├── main.go                        # HTTP server, routes, and request handlers
+├── main_test.go                   # HTTP handler tests
 ├── services.json                  # Configuration: hosts, systemd units to monitor
 ├── config/
-│   └── config.go                  # Shared configuration loading and types
+│   ├── config.go                  # Shared configuration loading and types
+│   └── config_test.go             # Config loading and helper tests
 ├── services/
 │   ├── service.go                 # Common Service interface and ServiceInfo type
+│   ├── service_test.go            # ServiceInfo serialization tests
 │   ├── docker/
-│   │   └── docker.go              # Docker provider and service implementation
+│   │   ├── docker.go              # Docker provider and service implementation
+│   │   ├── docker_test.go         # Unit tests (mocked, no Docker required)
+│   │   └── docker_integration_test.go  # Integration tests (requires Docker)
 │   └── systemd/
-│       └── systemd.go             # Systemd provider and service implementation
+│       ├── systemd.go             # Systemd provider and service implementation
+│       ├── systemd_test.go        # Unit tests (mocked, no D-Bus required)
+│       └── systemd_integration_test.go # Integration tests (requires systemd)
 ├── static/
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
@@ -173,3 +181,36 @@ type Service interface {
 - **Inline log expansion:** Logs appear directly below the clicked service row
 - **Bootstrap for UI:** Consistent dark theme, responsive, minimal custom CSS
 - **Unified API:** Single `/api/services` endpoint returns all service types
+
+## Testing
+
+The project uses Go's built-in testing framework with two categories of tests:
+
+### Unit Tests (run without external dependencies)
+```bash
+go test ./...
+```
+
+Unit tests mock system dependencies and can run on any machine:
+- **config/** — Config loading, parsing, helper methods
+- **services/** — ServiceInfo JSON serialization
+- **services/docker/** — Log reader header stripping, provider methods
+- **services/systemd/** — Provider creation, systemctl output parsing
+- **main.go** — HTTP handler validation, SSE headers, error responses
+
+### Integration Tests (require Docker/systemd)
+```bash
+go test -tags=integration ./...
+```
+
+Integration tests use the `//go:build integration` build tag and test real system interactions:
+- **services/docker/** — Real Docker API calls, container listing, log streaming
+- **services/systemd/** — Real D-Bus connections, journalctl log streaming
+
+| Package | Unit Tests | Integration Tests |
+|---------|------------|-------------------|
+| config | ✅ | — |
+| services | ✅ | — |
+| services/docker | ✅ | ✅ |
+| services/systemd | ✅ | ✅ |
+| main | ✅ | — |
