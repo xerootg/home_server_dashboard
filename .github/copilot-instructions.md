@@ -9,15 +9,59 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 
 ```
 home_server_dashboard/
-├── main.go              # Go HTTP server + Docker/systemd integration
-├── services.json        # Configuration: hosts, systemd units to monitor
+├── main.go                        # HTTP server, routes, and request handlers
+├── services.json                  # Configuration: hosts, systemd units to monitor
+├── config/
+│   └── config.go                  # Shared configuration loading and types
+├── services/
+│   ├── service.go                 # Common Service interface and ServiceInfo type
+│   ├── docker/
+│   │   └── docker.go              # Docker provider and service implementation
+│   └── systemd/
+│       └── systemd.go             # Systemd provider and service implementation
 ├── static/
-│   ├── index.html       # Dashboard HTML structure (Bootstrap 5)
-│   ├── style.css        # Custom dark theme styling
-│   └── app.js           # Client-side logic, SSE handling, sorting/filtering
+│   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
+│   ├── style.css                  # Custom dark theme styling
+│   └── app.js                     # Client-side logic, SSE handling, sorting/filtering
 ├── go.mod
 └── go.sum
 ```
+
+## Package Structure
+
+### `config` Package
+- **Purpose:** Shared configuration loading from `services.json`
+- **Key Types:**
+  - `HostConfig` — Single host configuration with helper methods like `IsLocal()`
+  - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`
+- **Functions:** `Load()`, `Get()`, `Default()`
+
+### `services` Package
+- **Purpose:** Defines common interface and types for all service providers
+- **Key Types:**
+  - `ServiceInfo` — Status information struct (JSON serializable)
+  - `Service` — Interface for individual service control (GetInfo, GetLogs, Start, Stop, Restart)
+  - `Provider` — Interface for service discovery (GetServices, GetService, GetLogs)
+
+### `services/docker` Package
+- **Purpose:** Docker container management via Docker API
+- **Key Types:**
+  - `Provider` — Implements `services.Provider` for Docker containers
+  - `DockerService` — Implements `services.Service` for individual containers
+- **Features:**
+  - Connects via Docker socket
+  - Filters by Docker Compose labels
+  - Streams logs with 8-byte header demultiplexing
+
+### `services/systemd` Package
+- **Purpose:** Systemd unit management via D-Bus (local) or SSH (remote)
+- **Key Types:**
+  - `Provider` — Implements `services.Provider` for systemd units
+  - `SystemdService` — Implements `services.Service` for individual units
+- **Features:**
+  - Auto-detects local vs remote based on address
+  - Uses D-Bus for localhost, SSH for remote hosts
+  - Streams logs via journalctl
 
 ## Configuration (services.json)
 
@@ -48,6 +92,7 @@ Defines which hosts and services to monitor:
 - `GET /static/*` — Static file server for CSS/JS
 - `GET /api/services` — Returns JSON array of all services (Docker + systemd)
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
+- `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
 
 **Service Types:**
 
@@ -57,7 +102,7 @@ Defines which hosts and services to monitor:
 | Systemd (local) | D-Bus | `github.com/coreos/go-systemd/v22/dbus` |
 | Systemd (remote) | SSH + systemctl | `os/exec` with `ssh` command |
 
-**ServiceInfo struct:**
+**ServiceInfo struct (in `services/service.go`):**
 ```go
 type ServiceInfo struct {
     Name          string `json:"name"`           // Service/unit name
@@ -71,12 +116,26 @@ type ServiceInfo struct {
 }
 ```
 
-**Docker Integration:**
+**Service Interface (in `services/service.go`):**
+```go
+type Service interface {
+    GetInfo(ctx context.Context) (ServiceInfo, error)
+    GetLogs(ctx context.Context, tailLines int, follow bool) (io.ReadCloser, error)
+    Start(ctx context.Context) error
+    Stop(ctx context.Context) error
+    Restart(ctx context.Context) error
+    GetName() string
+    GetHost() string
+    GetSource() string
+}
+```
+
+**Docker Integration (`services/docker/docker.go`):**
 - Queries containers via Docker socket on localhost
 - Filters by `com.docker.compose.project` and `com.docker.compose.service` labels
 - Streams logs using `ContainerLogs()` with multiplexed stdout/stderr
 
-**Systemd Integration:**
+**Systemd Integration (`services/systemd/systemd.go`):**
 - Local: Uses D-Bus via `dbus.NewSystemConnectionContext()` and `ListUnitsContext()`
 - Remote: Uses SSH to run `systemctl show <unit> --property=ActiveState,SubState,LoadState`
 - Filters units by exact name match from config
@@ -90,7 +149,7 @@ type ServiceInfo struct {
 2. JavaScript renders table rows with source icons, host badges, status badges
 3. Click row → `toggleLogs()` inserts inline logs row below
 4. For Docker: SSE connection streams real-time logs
-5. For Systemd: Shows journalctl command (logs not streamed)
+5. For Systemd: SSE connection streams journalctl logs
 6. Click again or ✕ → closes logs and disconnects SSE
 
 **UI Features:**
