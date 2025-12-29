@@ -6,11 +6,27 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 
 	"home_server_dashboard/services"
+)
+
+// Docker label constants for dashboard configuration
+const (
+	// LabelPrefix is the common prefix for all dashboard labels
+	LabelPrefix = "home.server.dashboard"
+	// LabelDescription is the label for service description
+	LabelDescription = LabelPrefix + ".description"
+	// LabelHidden is the label to hide an entire service from the dashboard
+	LabelHidden = LabelPrefix + ".hidden"
+	// LabelPortsPrefix is the prefix for port-specific labels
+	LabelPortsPrefix = LabelPrefix + ".ports"
+	// LabelPortsHidden is the label for a comma-separated list of hidden port numbers
+	LabelPortsHidden = LabelPortsPrefix + ".hidden"
 )
 
 // Provider implements services.Provider for Docker containers.
@@ -72,11 +88,14 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 			}
 		}
 
-		// Extract non-localhost exposed ports
-		ports := extractExposedPorts(ctr.Ports)
+		// Extract non-localhost exposed ports with label customizations
+		ports := extractExposedPorts(ctr.Ports, ctr.Labels)
 
 		// Extract custom description from label
-		description := ctr.Labels["home.server.dashboard.description"]
+		description := ctr.Labels[LabelDescription]
+
+		// Check if service should be hidden
+		hidden := isLabelTrue(ctr.Labels[LabelHidden])
 
 		result = append(result, services.ServiceInfo{
 			Name:          service,
@@ -89,6 +108,7 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 			Host:          p.hostName,
 			Ports:         ports,
 			Description:   description,
+			Hidden:        hidden,
 		})
 	}
 
@@ -98,7 +118,11 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 // extractExposedPorts filters ports to only include those bound to non-localhost addresses.
 // This includes ports bound to 0.0.0.0 (all interfaces) or empty IP (also all interfaces).
 // Deduplicates ports by host_port:protocol combination.
-func extractExposedPorts(ports []container.Port) []services.PortInfo {
+// Applies label customizations for port labels and hidden status.
+func extractExposedPorts(ports []container.Port, labels map[string]string) []services.PortInfo {
+	// Parse hidden ports from comma-separated list
+	hiddenPorts := parseHiddenPorts(labels[LabelPortsHidden])
+
 	seen := make(map[string]bool)
 	var result []services.PortInfo
 	for _, port := range ports {
@@ -116,14 +140,58 @@ func extractExposedPorts(ports []container.Port) []services.PortInfo {
 			continue
 		}
 		seen[key] = true
+
+		// Get port-specific label and hidden status
+		portLabel := getPortLabel(labels, port.PublicPort)
+		portHidden := hiddenPorts[port.PublicPort] || isPortHiddenByLabel(labels, port.PublicPort)
+
 		// Include ports bound to 0.0.0.0, empty (all interfaces), or specific non-localhost IPs
 		result = append(result, services.PortInfo{
 			HostPort:      port.PublicPort,
 			ContainerPort: port.PrivatePort,
 			Protocol:      port.Type,
+			Label:         portLabel,
+			Hidden:        portHidden,
 		})
 	}
 	return result
+}
+
+// isLabelTrue checks if a label value represents a true boolean.
+// Accepts "true", "1", "yes" (case-insensitive).
+func isLabelTrue(value string) bool {
+	v := strings.ToLower(strings.TrimSpace(value))
+	return v == "true" || v == "1" || v == "yes"
+}
+
+// parseHiddenPorts parses a comma-separated list of port numbers into a set.
+// Example: "8080,443,9000" -> {8080: true, 443: true, 9000: true}
+func parseHiddenPorts(value string) map[uint16]bool {
+	result := make(map[uint16]bool)
+	if value == "" {
+		return result
+	}
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if port, err := strconv.ParseUint(part, 10, 16); err == nil {
+			result[uint16(port)] = true
+		}
+	}
+	return result
+}
+
+// getPortLabel retrieves the custom label for a specific port from Docker labels.
+// Looks for: home.server.dashboard.ports.<port>.label
+func getPortLabel(labels map[string]string, port uint16) string {
+	key := fmt.Sprintf("%s.%d.label", LabelPortsPrefix, port)
+	return labels[key]
+}
+
+// isPortHiddenByLabel checks if a specific port is hidden via its own label.
+// Looks for: home.server.dashboard.ports.<port>.hidden
+func isPortHiddenByLabel(labels map[string]string, port uint16) bool {
+	key := fmt.Sprintf("%s.%d.hidden", LabelPortsPrefix, port)
+	return isLabelTrue(labels[key])
 }
 
 // GetService returns a specific Docker service by container name.
@@ -176,11 +244,14 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 	project := inspect.Config.Labels["com.docker.compose.project"]
 	service := inspect.Config.Labels["com.docker.compose.service"]
 
-	// Extract non-localhost exposed ports from network settings
-	ports := extractPortsFromInspect(inspect.NetworkSettings)
+	// Extract non-localhost exposed ports from network settings with label customizations
+	ports := extractPortsFromInspect(inspect.NetworkSettings, inspect.Config.Labels)
 
 	// Extract custom description from label
-	description := inspect.Config.Labels["home.server.dashboard.description"]
+	description := inspect.Config.Labels[LabelDescription]
+
+	// Check if service should be hidden
+	hidden := isLabelTrue(inspect.Config.Labels[LabelHidden])
 
 	return services.ServiceInfo{
 		Name:          service,
@@ -193,15 +264,21 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 		Host:          s.hostName,
 		Ports:         ports,
 		Description:   description,
+		Hidden:        hidden,
 	}, nil
 }
 
 // extractPortsFromInspect extracts non-localhost ports from container inspect network settings.
 // Deduplicates ports by host_port:protocol combination.
-func extractPortsFromInspect(settings *container.NetworkSettings) []services.PortInfo {
+// Applies label customizations for port labels and hidden status.
+func extractPortsFromInspect(settings *container.NetworkSettings, labels map[string]string) []services.PortInfo {
 	if settings == nil {
 		return nil
 	}
+
+	// Parse hidden ports from comma-separated list
+	hiddenPorts := parseHiddenPorts(labels[LabelPortsHidden])
+
 	seen := make(map[string]bool)
 	var result []services.PortInfo
 	for portProto, bindings := range settings.Ports {
@@ -221,10 +298,17 @@ func extractPortsFromInspect(settings *container.NetworkSettings) []services.Por
 				continue
 			}
 			seen[key] = true
+
+			// Get port-specific label and hidden status
+			portLabel := getPortLabel(labels, hostPort)
+			portHidden := hiddenPorts[hostPort] || isPortHiddenByLabel(labels, hostPort)
+
 			result = append(result, services.PortInfo{
 				HostPort:      hostPort,
 				ContainerPort: uint16(portProto.Int()),
 				Protocol:      portProto.Proto(),
+				Label:         portLabel,
+				Hidden:        portHidden,
 			})
 		}
 	}

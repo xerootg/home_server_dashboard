@@ -81,19 +81,31 @@ To display Traefik-exposed hostnames as clickable links next to services, enable
 
 The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
 
-### Service Descriptions
+### Docker Labels
 
-The dashboard displays descriptions for services when available:
+The dashboard reads custom labels from Docker containers to customize visibility and display:
 
-- **Docker**: Add a `home.server.dashboard.description` label to your container in `docker-compose.yml`:
-  ```yaml
-  services:
-    myapp:
-      labels:
-        - "home.server.dashboard.description=My application description"
-  ```
+| Label | Description |
+|-------|-------------|
+| `home.server.dashboard.description` | Custom description displayed below service name |
+| `home.server.dashboard.hidden` | Set to `true` to hide service from dashboard |
+| `home.server.dashboard.ports.hidden` | Comma-separated port numbers to hide (e.g., `8080,9000`) |
+| `home.server.dashboard.ports.<port>.label` | Custom label for a specific port |
+| `home.server.dashboard.ports.<port>.hidden` | Set to `true` to hide a specific port |
 
-- **Systemd**: Descriptions are automatically fetched from the unit's `Description` field.
+Example:
+```yaml
+services:
+  myapp:
+    labels:
+      home.server.dashboard.description: "My application"
+      home.server.dashboard.ports.8080.label: "Admin Panel"
+      home.server.dashboard.ports.9000.hidden: "true"
+```
+
+### Systemd Descriptions
+
+Descriptions for systemd units are automatically fetched from the unit's `Description` field.
 
 ## Service Control Setup
 

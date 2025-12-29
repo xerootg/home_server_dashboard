@@ -11,22 +11,25 @@ type PortInfo struct {
 	HostPort      uint16 `json:"host_port"`      // Port exposed on the host
 	ContainerPort uint16 `json:"container_port"` // Port on the container
 	Protocol      string `json:"protocol"`       // "tcp" or "udp"
+	Label         string `json:"label,omitempty"` // Custom label for display (from Docker label)
+	Hidden        bool   `json:"hidden,omitempty"` // If true, port should be hidden from UI
 }
 
 // ServiceInfo represents the status information for any service.
 type ServiceInfo struct {
-	Name          string     `json:"name"`           // Service/unit name
-	Project       string     `json:"project"`        // Docker project or "systemd"
-	ContainerName string     `json:"container_name"` // Container name or unit name
-	State         string     `json:"state"`          // "running" or "stopped"
-	Status        string     `json:"status"`         // Human-readable status
-	Image         string     `json:"image"`          // Docker image or "-"
-	Source        string     `json:"source"`         // "docker" or "systemd"
-	Host          string     `json:"host"`           // Host name from config
-	HostIP        string     `json:"host_ip"`        // Private IP address for port links
-	Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
-	TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
-	Description   string     `json:"description"`    // Service description (from Docker label or systemd unit)
+	Name          string     `json:"name"`                    // Service/unit name
+	Project       string     `json:"project"`                 // Docker project or "systemd"
+	ContainerName string     `json:"container_name"`          // Container name or unit name
+	State         string     `json:"state"`                   // "running" or "stopped"
+	Status        string     `json:"status"`                  // Human-readable status
+	Image         string     `json:"image"`                   // Docker image or "-"
+	Source        string     `json:"source"`                  // "docker" or "systemd"
+	Host          string     `json:"host"`                    // Host name from config
+	HostIP        string     `json:"host_ip"`                 // Private IP address for port links
+	Ports         []PortInfo `json:"ports"`                   // Exposed ports (non-localhost bindings)
+	TraefikURLs   []string   `json:"traefik_urls"`            // Traefik-exposed hostnames (as full URLs)
+	Description   string     `json:"description"`             // Service description (from Docker label or systemd unit)
+	Hidden        bool       `json:"hidden,omitempty"`        // If true, service should be hidden from UI
 }
 
 // LogStreamer provides a stream of log data.

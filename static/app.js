@@ -55,10 +55,17 @@ function renderPorts(ports, hostIP) {
     }
     // Use hostIP if available, otherwise fall back to current hostname
     const targetHost = hostIP || window.location.hostname;
-    return ports.map(port => {
-        const url = `http://${targetHost}:${port.host_port}`;
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="port-link badge bg-info text-dark me-1" onclick="event.stopPropagation();" title="Open port ${port.host_port} (${port.protocol})">:${port.host_port}</a>`;
-    }).join('');
+    return ports
+        .filter(port => !port.hidden) // Filter out hidden ports
+        .map(port => {
+            const url = `http://${targetHost}:${port.host_port}`;
+            // Use custom label if provided, otherwise show port number
+            const displayText = port.label ? escapeHtml(port.label) : `:${port.host_port}`;
+            const titleText = port.label 
+                ? `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`
+                : `Open port ${port.host_port} (${port.protocol})`;
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="port-link badge bg-info text-dark me-1" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
+        }).join('');
 }
 
 function renderTraefikURLs(traefikURLs) {
@@ -340,7 +347,9 @@ async function loadServices() {
         if (!response.ok) {
             throw new Error('Failed to fetch services');
         }
-        allServices = await response.json();
+        const rawServices = await response.json();
+        // Filter out hidden services
+        allServices = rawServices.filter(service => !service.hidden);
         renderServices(allServices);
         
         // Re-apply filter if one is active

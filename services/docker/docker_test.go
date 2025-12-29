@@ -115,7 +115,7 @@ func TestExtractExposedPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractExposedPorts(tt.ports)
+			result := extractExposedPorts(tt.ports, nil)
 
 			if len(result) != len(tt.expected) {
 				t.Fatalf("extractExposedPorts() returned %d ports, want %d", len(result), len(tt.expected))
@@ -428,5 +428,276 @@ func TestDescriptionLabelKey(t *testing.T) {
 	emptyDescription := emptyLabels[expectedLabelKey]
 	if emptyDescription != "" {
 		t.Errorf("Expected empty description for labels without description key, got %q", emptyDescription)
+	}
+}
+
+// TestIsLabelTrue tests the isLabelTrue helper function.
+func TestIsLabelTrue(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"true", true},
+		{"True", true},
+		{"TRUE", true},
+		{"1", true},
+		{"yes", true},
+		{"Yes", true},
+		{"YES", true},
+		{"false", false},
+		{"0", false},
+		{"no", false},
+		{"", false},
+		{"random", false},
+		{" true ", true},  // With whitespace
+		{" 1 ", true},     // With whitespace
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := isLabelTrue(tt.input)
+			if result != tt.expected {
+				t.Errorf("isLabelTrue(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestParseHiddenPorts tests the parseHiddenPorts helper function.
+func TestParseHiddenPorts(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected map[uint16]bool
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: map[uint16]bool{},
+		},
+		{
+			name:     "single port",
+			input:    "8080",
+			expected: map[uint16]bool{8080: true},
+		},
+		{
+			name:  "multiple ports",
+			input: "80,443,8080",
+			expected: map[uint16]bool{
+				80:   true,
+				443:  true,
+				8080: true,
+			},
+		},
+		{
+			name:  "ports with spaces",
+			input: " 80 , 443 , 8080 ",
+			expected: map[uint16]bool{
+				80:   true,
+				443:  true,
+				8080: true,
+			},
+		},
+		{
+			name:  "ignores invalid values",
+			input: "80,invalid,443,65536,-1",
+			expected: map[uint16]bool{
+				80:  true,
+				443: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseHiddenPorts(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("parseHiddenPorts(%q) returned %d ports, want %d", tt.input, len(result), len(tt.expected))
+			}
+			for port, expected := range tt.expected {
+				if result[port] != expected {
+					t.Errorf("parseHiddenPorts(%q)[%d] = %v, want %v", tt.input, port, result[port], expected)
+				}
+			}
+		})
+	}
+}
+
+// TestGetPortLabel tests the getPortLabel helper function.
+func TestGetPortLabel(t *testing.T) {
+	labels := map[string]string{
+		"home.server.dashboard.ports.8080.label": "Admin",
+		"home.server.dashboard.ports.443.label":  "HTTPS",
+		"home.server.dashboard.ports.80.label":   "",
+	}
+
+	tests := []struct {
+		port     uint16
+		expected string
+	}{
+		{8080, "Admin"},
+		{443, "HTTPS"},
+		{80, ""},
+		{9000, ""},  // Not in labels
+	}
+
+	for _, tt := range tests {
+		t.Run(string(rune(tt.port)), func(t *testing.T) {
+			result := getPortLabel(labels, tt.port)
+			if result != tt.expected {
+				t.Errorf("getPortLabel(labels, %d) = %q, want %q", tt.port, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIsPortHiddenByLabel tests the isPortHiddenByLabel helper function.
+func TestIsPortHiddenByLabel(t *testing.T) {
+	labels := map[string]string{
+		"home.server.dashboard.ports.8080.hidden": "true",
+		"home.server.dashboard.ports.443.hidden":  "false",
+		"home.server.dashboard.ports.80.hidden":   "1",
+		"home.server.dashboard.ports.9000.hidden": "yes",
+	}
+
+	tests := []struct {
+		port     uint16
+		expected bool
+	}{
+		{8080, true},
+		{443, false},
+		{80, true},
+		{9000, true},
+		{3000, false},  // Not in labels
+	}
+
+	for _, tt := range tests {
+		t.Run(string(rune(tt.port)), func(t *testing.T) {
+			result := isPortHiddenByLabel(labels, tt.port)
+			if result != tt.expected {
+				t.Errorf("isPortHiddenByLabel(labels, %d) = %v, want %v", tt.port, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestExtractExposedPortsWithLabels tests extractExposedPorts with label customizations.
+func TestExtractExposedPortsWithLabels(t *testing.T) {
+	tests := []struct {
+		name     string
+		ports    []container.Port
+		labels   map[string]string
+		expected []services.PortInfo
+	}{
+		{
+			name: "port with custom label",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8080.label": "Admin Panel",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Label: "Admin Panel", Hidden: false},
+			},
+		},
+		{
+			name: "port hidden by ports.hidden list",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "0.0.0.0", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.hidden": "8080",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Label: "", Hidden: true},
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", Label: "", Hidden: false},
+			},
+		},
+		{
+			name: "port hidden by individual label",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8080.hidden": "true",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Label: "", Hidden: true},
+			},
+		},
+		{
+			name: "combined label and hidden",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "0.0.0.0", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8080.label":  "Admin",
+				"home.server.dashboard.ports.8443.hidden": "true",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Label: "Admin", Hidden: false},
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", Label: "", Hidden: true},
+			},
+		},
+		{
+			name: "nil labels work",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: nil,
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Label: "", Hidden: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractExposedPorts(tt.ports, tt.labels)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("extractExposedPorts() returned %d ports, want %d", len(result), len(tt.expected))
+			}
+
+			for i, port := range result {
+				if port.HostPort != tt.expected[i].HostPort {
+					t.Errorf("port[%d].HostPort = %v, want %v", i, port.HostPort, tt.expected[i].HostPort)
+				}
+				if port.ContainerPort != tt.expected[i].ContainerPort {
+					t.Errorf("port[%d].ContainerPort = %v, want %v", i, port.ContainerPort, tt.expected[i].ContainerPort)
+				}
+				if port.Protocol != tt.expected[i].Protocol {
+					t.Errorf("port[%d].Protocol = %v, want %v", i, port.Protocol, tt.expected[i].Protocol)
+				}
+				if port.Label != tt.expected[i].Label {
+					t.Errorf("port[%d].Label = %q, want %q", i, port.Label, tt.expected[i].Label)
+				}
+				if port.Hidden != tt.expected[i].Hidden {
+					t.Errorf("port[%d].Hidden = %v, want %v", i, port.Hidden, tt.expected[i].Hidden)
+				}
+			}
+		})
+	}
+}
+
+// TestLabelConstants verifies the label constants are correct.
+func TestLabelConstants(t *testing.T) {
+	if LabelPrefix != "home.server.dashboard" {
+		t.Errorf("LabelPrefix = %q, want %q", LabelPrefix, "home.server.dashboard")
+	}
+	if LabelDescription != "home.server.dashboard.description" {
+		t.Errorf("LabelDescription = %q, want %q", LabelDescription, "home.server.dashboard.description")
+	}
+	if LabelHidden != "home.server.dashboard.hidden" {
+		t.Errorf("LabelHidden = %q, want %q", LabelHidden, "home.server.dashboard.hidden")
+	}
+	if LabelPortsPrefix != "home.server.dashboard.ports" {
+		t.Errorf("LabelPortsPrefix = %q, want %q", LabelPortsPrefix, "home.server.dashboard.ports")
+	}
+	if LabelPortsHidden != "home.server.dashboard.ports.hidden" {
+		t.Errorf("LabelPortsHidden = %q, want %q", LabelPortsHidden, "home.server.dashboard.ports.hidden")
 	}
 }

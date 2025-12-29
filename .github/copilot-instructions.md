@@ -210,24 +210,27 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 **ServiceInfo struct (in `services/service.go`):**
 ```go
 type PortInfo struct {
-    HostPort      uint16 `json:"host_port"`      // Port exposed on the host
-    ContainerPort uint16 `json:"container_port"` // Port on the container
-    Protocol      string `json:"protocol"`       // "tcp" or "udp"
+    HostPort      uint16 `json:"host_port"`       // Port exposed on the host
+    ContainerPort uint16 `json:"container_port"`  // Port on the container
+    Protocol      string `json:"protocol"`        // "tcp" or "udp"
+    Label         string `json:"label,omitempty"` // Custom label for display (from Docker label)
+    Hidden        bool   `json:"hidden,omitempty"` // If true, port should be hidden from UI
 }
 
 type ServiceInfo struct {
-    Name          string     `json:"name"`           // Service/unit name
-    Project       string     `json:"project"`        // Docker project or "systemd"
-    ContainerName string     `json:"container_name"` // Container name or unit name
-    State         string     `json:"state"`          // "running" or "stopped"
-    Status        string     `json:"status"`         // Human-readable status
-    Image         string     `json:"image"`          // Docker image or "-"
-    Source        string     `json:"source"`         // "docker" or "systemd"
-    Host          string     `json:"host"`           // Host name from config
-    HostIP        string     `json:"host_ip"`        // Private IP address for port links
-    Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
-    TraefikURLs   []string   `json:"traefik_urls"`   // Traefik-exposed hostnames (as full URLs)
-    Description   string     `json:"description"`    // Service description (from Docker label or systemd unit)
+    Name          string     `json:"name"`                    // Service/unit name
+    Project       string     `json:"project"`                 // Docker project or "systemd"
+    ContainerName string     `json:"container_name"`          // Container name or unit name
+    State         string     `json:"state"`                   // "running" or "stopped"
+    Status        string     `json:"status"`                  // Human-readable status
+    Image         string     `json:"image"`                   // Docker image or "-"
+    Source        string     `json:"source"`                  // "docker" or "systemd"
+    Host          string     `json:"host"`                    // Host name from config
+    HostIP        string     `json:"host_ip"`                 // Private IP address for port links
+    Ports         []PortInfo `json:"ports"`                   // Exposed ports (non-localhost bindings)
+    TraefikURLs   []string   `json:"traefik_urls"`            // Traefik-exposed hostnames (as full URLs)
+    Description   string     `json:"description"`             // Service description (from Docker label or systemd unit)
+    Hidden        bool       `json:"hidden,omitempty"`        // If true, service should be hidden from UI
 }
 ```
 
@@ -250,6 +253,30 @@ type Service interface {
 - Filters by `com.docker.compose.project` and `com.docker.compose.service` labels
 - Extracts custom description from `home.server.dashboard.description` label
 - Streams logs using `ContainerLogs()` with multiplexed stdout/stderr
+
+**Docker Dashboard Labels:**
+The dashboard reads the following labels from Docker containers to customize visibility and display:
+
+| Label | Values | Description |
+|-------|--------|-------------|
+| `home.server.dashboard.description` | Any string | Custom description displayed below service name |
+| `home.server.dashboard.hidden` | `true`, `1`, `yes` | Hide entire service from dashboard |
+| `home.server.dashboard.ports.hidden` | `port1,port2,...` | Comma-separated list of port numbers to hide |
+| `home.server.dashboard.ports.<port>.label` | Any string | Custom label for a specific port (e.g., `home.server.dashboard.ports.8080.label=Admin`) |
+| `home.server.dashboard.ports.<port>.hidden` | `true`, `1`, `yes` | Hide a specific port from display |
+
+Example docker-compose.yml:
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    labels:
+      home.server.dashboard.description: "My awesome application"
+      home.server.dashboard.ports.8080.label: "Admin"
+      home.server.dashboard.ports.9000.hidden: "true"
+      # Or hide multiple ports at once:
+      # home.server.dashboard.ports.hidden: "9000,9001"
+```
 
 **Systemd Integration (`services/systemd/systemd.go`):**
 - Local: Uses D-Bus via `dbus.NewSystemConnectionContext()` and `ListUnitsContext()`
