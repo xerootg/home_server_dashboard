@@ -59,26 +59,31 @@ function renderPorts(ports, hostIP) {
         .filter(port => !port.hidden) // Filter out hidden ports
         .map(port => {
             const url = `http://${targetHost}:${port.host_port}`;
-            // Use custom label if provided, otherwise show port number
-            // If the port is remapped from another service, show the source service name
+            // Determine display text and styling based on port remapping
+            // - source_service: port is remapped TO this service FROM source_service
+            // - target_service: port is remapped FROM this service TO target_service
             let displayText;
-            if (port.label) {
-                displayText = escapeHtml(port.label);
-            } else if (port.source_service) {
-                displayText = `${escapeHtml(port.source_service)}:${port.host_port}`;
-            } else {
-                displayText = `:${port.host_port}`;
-            }
-            
             let titleText;
+            let badgeClass = 'port-link badge bg-info text-dark me-1';
+            
             if (port.label) {
+                // Custom label takes precedence
+                displayText = escapeHtml(port.label);
                 titleText = `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`;
+            } else if (port.target_service) {
+                // This port is remapped to another service - show target and de-emphasize
+                displayText = `<i class="bi bi-arrow-right me-1"></i>${escapeHtml(port.target_service)}:${port.host_port}`;
+                titleText = `Port ${port.host_port} remapped to ${escapeHtml(port.target_service)} (${port.protocol})`;
+                badgeClass = 'port-link badge bg-secondary text-light me-1'; // De-emphasized style
             } else if (port.source_service) {
+                // This port comes from another service
+                displayText = `${escapeHtml(port.source_service)}:${port.host_port}`;
                 titleText = `Port ${port.host_port} from ${escapeHtml(port.source_service)} (${port.protocol})`;
             } else {
+                displayText = `:${port.host_port}`;
                 titleText = `Open port ${port.host_port} (${port.protocol})`;
             }
-            return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="port-link badge bg-info text-dark me-1" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
         }).join('');
 }
 

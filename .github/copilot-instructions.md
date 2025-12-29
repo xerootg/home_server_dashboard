@@ -215,7 +215,8 @@ type PortInfo struct {
     Protocol      string `json:"protocol"`                  // "tcp" or "udp"
     Label         string `json:"label,omitempty"`           // Custom label for display (from Docker label)
     Hidden        bool   `json:"hidden,omitempty"`          // If true, port should be hidden from UI
-    SourceService string `json:"source_service,omitempty"`  // Service that exposes this port (for remapped ports)
+    SourceService string `json:"source_service,omitempty"`  // Service that exposes this port (for remapped ports on target)
+    TargetService string `json:"target_service,omitempty"`  // Service this port is remapped to (for remapped ports on source)
 }
 
 type ServiceInfo struct {
@@ -291,7 +292,9 @@ services:
   qbittorrent-books:
     image: lscr.io/linuxserver/qbittorrent
     network_mode: "service:gluetun"  # Uses gluetun's network
-    # Port 8193 will appear here with "gluetun:8193" label
+    # Port 8193 will appear on both services:
+    # - On gluetun: "→qbittorrent-books:8193" (de-emphasized, grey badge with arrow icon)
+    # - On qbittorrent-books: "gluetun:8193" (normal info badge)
 ```
 
 **Systemd Integration (`services/systemd/systemd.go`):**

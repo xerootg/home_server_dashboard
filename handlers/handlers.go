@@ -84,7 +84,8 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 
 // applyPortRemaps moves ports from source services to target services based on remap labels.
 // This is used when services run in another container's network namespace (e.g., qbittorrent in gluetun).
-// The remapped ports will have SourceService set to indicate which service exposes the port.
+// The remapped ports will have SourceService set on the target to indicate which service exposes the port,
+// and TargetService set on the source to indicate where the port is remapped to.
 func applyPortRemaps(svcList []services.ServiceInfo, remaps []docker.PortRemap) []services.ServiceInfo {
 	if len(remaps) == 0 {
 		return svcList
@@ -111,31 +112,29 @@ func applyPortRemaps(svcList []services.ServiceInfo, remaps []docker.PortRemap) 
 		sourceSvc := &svcList[sourceIdx]
 		targetSvc := &svcList[targetIdx]
 
-		var portToMove *services.PortInfo
 		var portIdx int = -1
 		for i, port := range sourceSvc.Ports {
 			if port.HostPort == remap.Port {
-				portToMove = &sourceSvc.Ports[i]
 				portIdx = i
 				break
 			}
 		}
 
-		if portToMove == nil {
+		if portIdx == -1 {
 			log.Printf("Warning: port remap failed - port %d not found on service %s",
 				remap.Port, remap.SourceService)
 			continue
 		}
 
-		// Create a copy of the port with SourceService set
-		remappedPort := *portToMove
+		// Create a copy of the port with SourceService set for the target
+		remappedPort := sourceSvc.Ports[portIdx]
 		remappedPort.SourceService = remap.SourceService
 
 		// Add to target service
 		targetSvc.Ports = append(targetSvc.Ports, remappedPort)
 
-		// Remove from source service (mark as hidden instead to preserve order)
-		sourceSvc.Ports[portIdx].Hidden = true
+		// Mark source port with TargetService to show where it's remapped to
+		sourceSvc.Ports[portIdx].TargetService = remap.TargetService
 
 		log.Printf("Port %d remapped from %s to %s", remap.Port, remap.SourceService, remap.TargetService)
 	}
