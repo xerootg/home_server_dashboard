@@ -9,9 +9,15 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
+
 	"home_server_dashboard/config"
+	"home_server_dashboard/query"
 	"home_server_dashboard/services"
 	"home_server_dashboard/services/docker"
 	"home_server_dashboard/services/systemd"
@@ -218,4 +224,42 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+// BangAndPipeHandler handles GET /api/bangAndPipeToRegex requests.
+// It compiles a bang-and-pipe expression into an AST for client-side evaluation.
+func BangAndPipeHandler(w http.ResponseWriter, r *http.Request) {
+	expr := r.URL.Query().Get("expr")
+	
+	result := query.Compile(expr)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// BangAndPipeDocsHandler handles GET /api/docs/bangandpipe requests.
+// It renders the BangAndPipe query language documentation as HTML.
+func BangAndPipeDocsHandler(w http.ResponseWriter, r *http.Request) {
+	// Read the markdown file
+	mdContent, err := os.ReadFile("docs/bangandpipe-query-language.md")
+	if err != nil {
+		http.Error(w, "Documentation not found", http.StatusNotFound)
+		return
+	}
+
+	// Create markdown parser with extensions
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock
+	p := parser.NewWithExtensions(extensions)
+	doc := p.Parse(mdContent)
+
+	// Create HTML renderer with options
+	htmlFlags := html.CommonFlags | html.HrefTargetBlank
+	opts := html.RendererOptions{Flags: htmlFlags}
+	renderer := html.NewRenderer(opts)
+
+	// Render to HTML
+	htmlContent := markdown.Render(doc, renderer)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(htmlContent)
 }

@@ -2,7 +2,7 @@
 
 REQUIRED: Update this document with any architectural or design information about the project.
 REQUIRED: If you are working on a todo and find an issue, add it to the bottom of the todo list. the status should be "needs triage" and not checkmark or empty checkbox.
-REQUIRED: All tests must pass, including integration tests, before any item in todo can be marked done. if there are no tests for the feature, add them, and they must pass.
+REQUIRED: All tests must pass, including integration tests, before any item in todo can be marked done. if there are no tests for the feature, add them, and they must pass. The ONLY exception to this rule is for html/css/js files that are purely frontend and have no backend component.
 
 A lightweight Go web dashboard for monitoring Docker Compose services and systemd services across multiple hosts.
 
@@ -22,6 +22,11 @@ home_server_dashboard/
 ├── config/
 │   ├── config.go                  # Shared configuration loading and types
 │   └── config_test.go             # Config loading and helper tests
+├── query/
+│   ├── query.go                   # Bang & Pipe expression compiler (types, Compile)
+│   ├── lexer.go                   # Tokenizer for expression parsing
+│   ├── parser.go                  # Recursive descent parser for expressions
+│   └── query_test.go              # Comprehensive parser tests
 ├── services/
 │   ├── service.go                 # Common Service interface and ServiceInfo type
 │   ├── service_test.go            # ServiceInfo serialization tests
@@ -37,6 +42,9 @@ home_server_dashboard/
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
 │   └── app.js                     # Client-side logic, SSE handling, sorting/filtering
+├── tests/
+│   └── js/
+│       └── search_test.js         # JavaScript unit tests for search functionality
 ├── go.mod
 └── go.sum
 ```
@@ -72,6 +80,22 @@ home_server_dashboard/
   - `HostConfig` — Single host configuration with helper methods like `IsLocal()`
   - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`
 - **Functions:** `Load()`, `Get()`, `Default()`
+
+### `query` Package
+- **Purpose:** Compiles "Bang & Pipe" search expressions into ASTs for client-side evaluation
+- **Key Types:**
+  - `NodeType` — Enum: `pattern`, `or`, `and`, `not`
+  - `Node` — AST node with Type, Pattern, Regex, Children, Child fields
+  - `CompileError` — Parse error with Message, Position, Length
+  - `CompileResult` — Result with Valid, AST, Error fields
+- **Key Functions:**
+  - `Compile(expr string)` — Parses expression and returns AST or error
+  - `tokenize()` (internal) — Lexer for tokenizing input
+- **Grammar:**
+  - Operators: `|` (OR), `&` (AND), `!` (NOT), `()` (grouping)
+  - Literals: `"quoted string"` or unquoted terms
+  - Precedence: NOT > AND > OR
+- **Files:** `query.go`, `lexer.go`, `parser.go`, `query_test.go`
 
 ### `services` Package
 - **Purpose:** Defines common interface and types for all service providers
@@ -130,6 +154,8 @@ Defines which hosts and services to monitor:
 - `GET /api/services` — Returns JSON array of all services (Docker + systemd)
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
+- `GET /api/bangAndPipeToRegex?expr=<expr>` — Compiles Bang & Pipe expression to AST
+- `GET /api/docs/bangandpipe` — Returns rendered HTML documentation for Bang & Pipe syntax
 
 **Application Layers:**
 | Layer | Package | Responsibility |
@@ -139,6 +165,7 @@ Defines which hosts and services to monitor:
 | Handlers | `handlers` | Request processing, response generation |
 | Services | `services/*` | Docker/systemd provider implementations |
 | Config | `config` | Configuration loading and access |
+| Query | `query` | Bang & Pipe expression parsing |
 
 **Service Types:**
 
@@ -236,6 +263,7 @@ Unit tests mock system dependencies and can run on any machine:
 - **services/** — ServiceInfo JSON serialization
 - **services/docker/** — Log reader header stripping, provider methods
 - **services/systemd/** — Provider creation, systemctl output parsing
+- **query/** — Bang & Pipe expression lexer, parser, AST generation
 - **main.go** — Bootstrap and package integration
 
 ### Integration Tests (require Docker/systemd)
@@ -246,6 +274,15 @@ go test -tags=integration ./...
 Integration tests use the `//go:build integration` build tag and test real system interactions:
 - **services/docker/** — Real Docker API calls, container listing, log streaming
 - **services/systemd/** — Real D-Bus connections, journalctl log streaming
+- **js_integration_test.go** — Runs JavaScript unit tests via Node.js
+
+### JavaScript Tests
+```bash
+node tests/js/search_test.js
+```
+
+JavaScript tests cover the client-side search functionality:
+- **tests/js/search_test.js** — Text matching, regex parsing, AST evaluation (47 tests)
 
 | Package | Unit Tests | Integration Tests |
 |---------|------------|-------------------|
@@ -253,6 +290,8 @@ Integration tests use the `//go:build integration` build tag and test real syste
 | handlers | ✅ | — |
 | server | ✅ | — |
 | config | ✅ | — |
+| query | ✅ | — |
 | services | ✅ | — |
 | services/docker | ✅ | ✅ |
 | services/systemd | ✅ | ✅ |
+| tests/js | ✅ (Node.js) | — |

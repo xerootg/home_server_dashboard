@@ -224,3 +224,280 @@ th.sortable:hover {
 .logs-status.error {
     color: #e74c3c;
 }
+
+/* VS Code-style Logs Search Widget */
+.logs-search-widget {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: #252526;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+    padding: 2px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.logs-search-widget:focus-within {
+    border-color: #007acc;
+}
+
+.logs-search-input-wrapper {
+    display: flex;
+    align-items: center;
+}
+
+.logs-search-input {
+    background: transparent;
+    border: none;
+    color: #cccccc;
+    font-size: 13px;
+    width: 160px;
+    padding: 4px 6px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.logs-search-input:focus {
+    outline: none;
+}
+
+.logs-search-input::placeholder {
+    color: #6e6e6e;
+}
+
+.logs-search-input.has-error {
+    color: #f48771;
+    background: rgba(244, 135, 113, 0.1);
+}
+
+.logs-search-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: #cccccc;
+    cursor: pointer;
+    padding: 0;
+    font-size: 12px;
+}
+
+.logs-search-btn:hover {
+    background: #3c3c3c;
+}
+
+.logs-search-btn.active {
+    background: #094771;
+    color: #ffffff;
+}
+
+.logs-search-btn .case-icon {
+    font-weight: 600;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.logs-search-btn .regex-icon {
+    font-weight: 600;
+    font-size: 11px;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
+.logs-search-btn .bangpipe-icon {
+    font-weight: 600;
+    font-size: 10px;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    letter-spacing: -0.5px;
+}
+
+.logs-search-nav {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    margin-left: 2px;
+    padding-left: 4px;
+    border-left: 1px solid #3c3c3c;
+}
+
+.logs-match-count {
+    font-size: 12px;
+    color: #cccccc;
+    padding: 0 8px;
+    white-space: nowrap;
+    min-width: 70px;
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.logs-match-count.no-matches {
+    color: #f48771;
+}
+
+/* Log line visibility and highlighting */
+.log-line-hidden {
+    display: none;
+}
+
+.log-highlight {
+    background: rgba(234, 179, 8, 0.4);
+    color: inherit;
+    border-radius: 2px;
+}
+
+.log-highlight-current {
+    background: #515c6a;
+    outline: 1px solid #f9a825;
+}
+
+.log-line-current-match {
+    background: rgba(81, 92, 106, 0.3);
+}
+
+/* Bang & Pipe Error Popup */
+.logs-error-popup {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: #1e1e1e;
+    border: 1px solid #f48771;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.logs-error-popup.hidden {
+    display: none;
+}
+
+.logs-error-popup .error-message {
+    color: #f48771;
+    margin-bottom: 6px;
+}
+
+.logs-error-popup .error-expr {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    color: #cccccc;
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.logs-error-popup .error-highlight {
+    color: #f48771;
+    font-weight: bold;
+}
+
+.logs-error-popup .error-help-link {
+    color: #6cb6ff;
+    text-decoration: none;
+    margin-left: 8px;
+}
+
+.logs-error-popup .error-help-link:hover {
+    text-decoration: underline;
+}
+
+.logs-search-widget-wrapper {
+    position: relative;
+}
+
+/* Help Modal Content */
+.help-content {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #c9d1d9;
+}
+
+.help-content h1 {
+    font-size: 1.8em;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 0.3em;
+    margin-bottom: 1em;
+}
+
+.help-content h2 {
+    font-size: 1.4em;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 0.3em;
+    margin-top: 1.5em;
+    margin-bottom: 0.8em;
+}
+
+.help-content h3 {
+    font-size: 1.2em;
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+}
+
+.help-content code {
+    background: #161b22;
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.help-content pre {
+    background: #161b22;
+    padding: 12px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+.help-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.help-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+.help-content th,
+.help-content td {
+    padding: 8px 12px;
+    border: 1px solid #30363d;
+    text-align: left;
+}
+
+.help-content th {
+    background: #161b22;
+    font-weight: 600;
+}
+
+.help-content tr:nth-child(even) {
+    background: rgba(22, 27, 34, 0.5);
+}
+
+.help-content blockquote {
+    border-left: 4px solid #3b82f6;
+    padding-left: 16px;
+    margin: 1em 0;
+    color: #8b949e;
+}
+
+.help-content ul,
+.help-content ol {
+    padding-left: 2em;
+    margin: 0.5em 0;
+}
+
+.help-content li {
+    margin: 0.25em 0;
+}
+
+/* Help button styling */
+.logs-help-btn {
+    opacity: 0.6;
+}
+
+.logs-help-btn:hover {
+    opacity: 1;
+}

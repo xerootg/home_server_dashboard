@@ -318,3 +318,81 @@ func BenchmarkServicesHandler(b *testing.B) {
 		ServicesHandler(w, req)
 	}
 }
+
+// TestBangAndPipeDocsHandler_Success tests that the docs handler returns HTML.
+func TestBangAndPipeDocsHandler_Success(t *testing.T) {
+	// Save and restore current directory
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	
+	// Create a temporary docs directory with test content
+	tempDir := t.TempDir()
+	docsDir := filepath.Join(tempDir, "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		t.Fatalf("Failed to create docs dir: %v", err)
+	}
+	
+	// Write test markdown
+	mdContent := "# Test Title\n\nThis is **bold** and `code`."
+	if err := os.WriteFile(filepath.Join(docsDir, "bangandpipe-query-language.md"), []byte(mdContent), 0644); err != nil {
+		t.Fatalf("Failed to write test markdown: %v", err)
+	}
+	
+	// Change to temp directory
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(origDir)
+	
+	req := httptest.NewRequest(http.MethodGet, "/api/docs/bangandpipe", nil)
+	w := httptest.NewRecorder()
+	
+	BangAndPipeDocsHandler(w, req)
+	
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	
+	contentType := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(contentType, "text/html") {
+		t.Errorf("Expected text/html content type, got %s", contentType)
+	}
+	
+	body := w.Body.String()
+	if !strings.Contains(body, "<h1") {
+		t.Errorf("Expected HTML heading, got: %s", body)
+	}
+	if !strings.Contains(body, "<strong>bold</strong>") {
+		t.Errorf("Expected bold rendering, got: %s", body)
+	}
+	if !strings.Contains(body, "<code>code</code>") {
+		t.Errorf("Expected code rendering, got: %s", body)
+	}
+}
+
+// TestBangAndPipeDocsHandler_NotFound tests that missing docs returns 404.
+func TestBangAndPipeDocsHandler_NotFound(t *testing.T) {
+	// Save and restore current directory
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	
+	// Change to temp directory without docs folder
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(origDir)
+	
+	req := httptest.NewRequest(http.MethodGet, "/api/docs/bangandpipe", nil)
+	w := httptest.NewRecorder()
+	
+	BangAndPipeDocsHandler(w, req)
+	
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
