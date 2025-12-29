@@ -2,6 +2,7 @@ let eventSource = null;
 let activeLogsRow = null;
 let allServices = [];
 let activeFilter = null;
+let activeSourceFilter = null;
 let sortColumn = null;
 let sortDirection = 'asc';
 let logsSearchTerm = '';
@@ -48,6 +49,8 @@ function renderServices(services, updateStats = true) {
 
     let running = 0;
     let stopped = 0;
+    let dockerCount = 0;
+    let systemdCount = 0;
 
     // Count all services for stats (use allServices for accurate counts)
     const statsSource = updateStats ? services : allServices;
@@ -56,6 +59,11 @@ function renderServices(services, updateStats = true) {
             running++;
         } else {
             stopped++;
+        }
+        if (service.source === 'docker') {
+            dockerCount++;
+        } else if (service.source === 'systemd') {
+            systemdCount++;
         }
     });
 
@@ -88,6 +96,8 @@ function renderServices(services, updateStats = true) {
         document.getElementById('totalCount').textContent = services.length;
         document.getElementById('runningCount').textContent = running;
         document.getElementById('stoppedCount').textContent = stopped;
+        document.getElementById('dockerCount').innerHTML = '<i class="bi bi-box text-primary"></i> ' + dockerCount;
+        document.getElementById('systemdCount').innerHTML = '<i class="bi bi-gear-fill text-info"></i> ' + systemdCount;
     }
 }
 
@@ -99,8 +109,8 @@ function toggleFilter(filter) {
         activeFilter = filter;
     }
     
-    // Update card selection state
-    document.querySelectorAll('.stat-card').forEach(card => {
+    // Update card selection state (only status filters, not source filters)
+    document.querySelectorAll('.stat-card:not(.source-filter)').forEach(card => {
         card.classList.remove('active');
     });
     
@@ -115,10 +125,34 @@ function toggleFilter(filter) {
     applyFilter();
 }
 
+function toggleSourceFilter(source) {
+    // If clicking the same filter, clear it
+    if (activeSourceFilter === source) {
+        activeSourceFilter = null;
+    } else {
+        activeSourceFilter = source;
+    }
+    
+    // Update source filter card selection state
+    document.querySelectorAll('.stat-card.source-filter').forEach(card => {
+        card.classList.remove('active');
+    });
+    
+    if (activeSourceFilter) {
+        const activeCard = document.querySelector(`.stat-card[data-source-filter="${activeSourceFilter}"]`);
+        if (activeCard) {
+            activeCard.classList.add('active');
+        }
+    }
+    
+    // Apply filter
+    applyFilter();
+}
+
 function applyFilter() {
     let services = [...allServices];
     
-    // Apply filter
+    // Apply status filter
     if (activeFilter && activeFilter !== 'all') {
         services = services.filter(service => {
             const isRunning = service.state.toLowerCase() === 'running';
@@ -129,6 +163,11 @@ function applyFilter() {
             }
             return true;
         });
+    }
+    
+    // Apply source filter
+    if (activeSourceFilter) {
+        services = services.filter(service => service.source === activeSourceFilter);
     }
     
     // Apply sort

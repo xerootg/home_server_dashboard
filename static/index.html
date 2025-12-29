@@ -37,6 +37,22 @@
                     </div>
                 </div>
             </div>
+            <div class="col-auto">
+                <div class="card text-center stat-card source-filter" data-source-filter="docker" onclick="toggleSourceFilter('docker')">
+                    <div class="card-body">
+                        <h2 class="card-title mb-0" id="dockerCount"><i class="bi bi-box text-primary"></i> -</h2>
+                        <p class="card-text text-muted small mb-0">Docker</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="card text-center stat-card source-filter" data-source-filter="systemd" onclick="toggleSourceFilter('systemd')">
+                    <div class="card-body">
+                        <h2 class="card-title mb-0" id="systemdCount"><i class="bi bi-gear-fill text-info"></i> -</h2>
+                        <p class="card-text text-muted small mb-0">Systemd</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="card">
