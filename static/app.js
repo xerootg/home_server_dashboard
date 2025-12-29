@@ -17,6 +17,15 @@ let bangAndPipeAST = null;
 let bangAndPipeDebounceTimer = null;
 let helpContentCache = null;
 
+// Table search state
+let tableSearchTerm = '';
+let tableSearchCaseSensitive = false;
+let tableSearchRegex = false;
+let tableSearchBangAndPipe = false;
+let tableSearchError = '';
+let tableBangAndPipeAST = null;
+let tableSearchDebounceTimer = null;
+
 function getStatusClass(state, status) {
     state = state.toLowerCase();
     status = status.toLowerCase();
@@ -151,6 +160,7 @@ function toggleSourceFilter(source) {
 
 function applyFilter() {
     let services = [...allServices];
+    const totalBeforeSearch = services.length;
     
     // Apply status filter
     if (activeFilter && activeFilter !== 'all') {
@@ -169,6 +179,15 @@ function applyFilter() {
     if (activeSourceFilter) {
         services = services.filter(service => service.source === activeSourceFilter);
     }
+    
+    // Apply table search filter
+    const servicesBeforeSearch = services.length;
+    if (tableSearchTerm) {
+        services = services.filter(service => serviceMatchesTableSearch(service));
+    }
+    
+    // Update match count UI
+    updateTableMatchCountUI(services.length, servicesBeforeSearch);
     
     // Apply sort
     if (sortColumn) {
@@ -1040,6 +1059,329 @@ function highlightCurrentMatch() {
     
     // Scroll the line into view
     line.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ============================================================================
+// Table Search Functions
+// ============================================================================
+
+function onTableSearchInput(searchTerm) {
+    tableSearchTerm = searchTerm;
+    
+    // Show/hide clear button
+    const clearBtn = document.getElementById('tableClearBtn');
+    if (clearBtn) {
+        clearBtn.style.display = searchTerm ? 'flex' : 'none';
+    }
+    
+    if (tableSearchBangAndPipe && searchTerm) {
+        // Debounce the API call for bang-and-pipe mode
+        if (tableSearchDebounceTimer) {
+            clearTimeout(tableSearchDebounceTimer);
+        }
+        tableSearchDebounceTimer = setTimeout(() => {
+            compileTableBangAndPipe(searchTerm);
+        }, 150);
+    } else {
+        tableBangAndPipeAST = null;
+        hideTableError();
+        applyFilter();
+    }
+}
+
+function onTableSearchKeydown(event) {
+    if (event.key === 'Escape') {
+        clearTableSearch();
+    }
+}
+
+function clearTableSearch() {
+    tableSearchTerm = '';
+    tableBangAndPipeAST = null;
+    tableSearchError = '';
+    
+    const input = document.getElementById('tableSearchInput');
+    if (input) input.value = '';
+    
+    const clearBtn = document.getElementById('tableClearBtn');
+    if (clearBtn) clearBtn.style.display = 'none';
+    
+    hideTableError();
+    applyFilter();
+}
+
+async function compileTableBangAndPipe(expr) {
+    try {
+        const response = await fetch('/api/bangAndPipeToRegex?expr=' + encodeURIComponent(expr));
+        const result = await response.json();
+        
+        if (result.valid) {
+            tableBangAndPipeAST = result.ast;
+            tableSearchError = '';
+            hideTableError();
+        } else {
+            tableBangAndPipeAST = null;
+            tableSearchError = result.error.message;
+            showTableError(result.error);
+        }
+        
+        applyFilter();
+    } catch (e) {
+        console.error('Error compiling bang-and-pipe expression:', e);
+        tableBangAndPipeAST = null;
+        tableSearchError = 'Failed to compile expression';
+        applyFilter();
+    }
+}
+
+function showTableError(error) {
+    const popup = document.getElementById('tableErrorPopup');
+    const input = document.getElementById('tableSearchInput');
+    if (!popup || !input) return;
+    
+    // Build error message with position indicator
+    const expr = tableSearchTerm;
+    let html = '<div class="error-message">' + escapeHtml(error.message) + ' <a href="#" class="error-help-link" onclick="showHelpModal(); return false;">Syntax help</a></div>';
+    
+    if (error.position !== undefined && expr) {
+        const before = escapeHtml(expr.substring(0, error.position));
+        const errorPart = escapeHtml(expr.substring(error.position, error.position + (error.length || 1)));
+        const after = escapeHtml(expr.substring(error.position + (error.length || 1)));
+        html += '<div class="error-expr"><code>' + before + '<span class="error-highlight">' + (errorPart || '▯') + '</span>' + after + '</code></div>';
+    }
+    
+    popup.innerHTML = html;
+    popup.classList.remove('hidden');
+    input.classList.add('has-error');
+}
+
+function hideTableError() {
+    const popup = document.getElementById('tableErrorPopup');
+    const input = document.getElementById('tableSearchInput');
+    if (popup) popup.classList.add('hidden');
+    if (input) input.classList.remove('has-error');
+}
+
+function toggleTableCaseSensitivity() {
+    tableSearchCaseSensitive = !tableSearchCaseSensitive;
+    updateTableCaseToggleUI();
+    applyFilter();
+}
+
+function toggleTableRegex() {
+    tableSearchRegex = !tableSearchRegex;
+    // Disable bang-and-pipe if enabling regex (they're mutually exclusive)
+    if (tableSearchRegex && tableSearchBangAndPipe) {
+        tableSearchBangAndPipe = false;
+        updateTableBangPipeToggleUI();
+    }
+    updateTableRegexToggleUI();
+    hideTableError();
+    applyFilter();
+}
+
+function toggleTableBangAndPipe() {
+    tableSearchBangAndPipe = !tableSearchBangAndPipe;
+    // Disable regex if enabling bang-and-pipe (they're mutually exclusive)
+    if (tableSearchBangAndPipe && tableSearchRegex) {
+        tableSearchRegex = false;
+        updateTableRegexToggleUI();
+    }
+    updateTableBangPipeToggleUI();
+    
+    if (tableSearchBangAndPipe && tableSearchTerm) {
+        // Compile the current expression
+        compileTableBangAndPipe(tableSearchTerm);
+    } else {
+        tableBangAndPipeAST = null;
+        hideTableError();
+        applyFilter();
+    }
+}
+
+function updateTableCaseToggleUI() {
+    const caseBtn = document.getElementById('tableCaseToggle');
+    if (!caseBtn) return;
+    
+    if (tableSearchCaseSensitive) {
+        caseBtn.classList.add('active');
+        caseBtn.title = 'Case sensitive (click to toggle)';
+    } else {
+        caseBtn.classList.remove('active');
+        caseBtn.title = 'Case insensitive (click to toggle)';
+    }
+}
+
+function updateTableRegexToggleUI() {
+    const regexBtn = document.getElementById('tableRegexToggle');
+    const input = document.getElementById('tableSearchInput');
+    if (!regexBtn) return;
+    
+    if (tableSearchRegex) {
+        regexBtn.classList.add('active');
+        regexBtn.title = 'Regular expression enabled (click to toggle)';
+    } else {
+        regexBtn.classList.remove('active');
+        regexBtn.title = 'Use Regular Expression (click to toggle)';
+    }
+    
+    // Update input styling for regex errors
+    if (input) {
+        if (tableSearchError) {
+            input.classList.add('has-error');
+            input.title = tableSearchError;
+        } else {
+            input.classList.remove('has-error');
+            input.title = '';
+        }
+    }
+}
+
+function updateTableBangPipeToggleUI() {
+    const btn = document.getElementById('tableBangPipeToggle');
+    if (!btn) return;
+    
+    if (tableSearchBangAndPipe) {
+        btn.classList.add('active');
+        btn.title = 'Bang & Pipe mode enabled: Use ! (not), & (and), | (or), () grouping, "" literals';
+    } else {
+        btn.classList.remove('active');
+        btn.title = 'Bang & Pipe mode: Use !&| operators';
+    }
+}
+
+function updateTableMatchCountUI(matchCount, totalCount) {
+    const countEl = document.getElementById('tableMatchCount');
+    if (!countEl) return;
+    
+    if (!tableSearchTerm) {
+        countEl.textContent = '';
+        countEl.classList.remove('no-matches');
+        return;
+    }
+    
+    if (tableSearchError) {
+        countEl.textContent = 'Invalid';
+        countEl.classList.add('no-matches');
+        return;
+    }
+    
+    if (matchCount === 0) {
+        countEl.textContent = 'No matches';
+        countEl.classList.add('no-matches');
+    } else {
+        countEl.textContent = `${matchCount} of ${totalCount}`;
+        countEl.classList.remove('no-matches');
+    }
+}
+
+/**
+ * Check if a service matches the table search term.
+ * Searches across all relevant fields: name, project, host, container_name, status, image, source
+ * @param {Object} service - The service object
+ * @returns {boolean} - True if the service matches the search
+ */
+function serviceMatchesTableSearch(service) {
+    if (!tableSearchTerm) return true;
+    
+    // Combine all searchable fields into a single string for matching
+    // This makes the search work across any column and is extensible
+    const searchableText = [
+        service.name || '',
+        service.project || '',
+        service.host || '',
+        service.container_name || '',
+        service.status || '',
+        service.state || '',
+        service.image || '',
+        service.source || ''
+    ].join(' ');
+    
+    return tableTextMatches(searchableText, tableSearchTerm);
+}
+
+/**
+ * Check if text matches the table search term using current search settings
+ * @param {string} text - The text to search in
+ * @param {string} searchTerm - The search term
+ * @returns {boolean} - True if the text matches
+ */
+function tableTextMatches(text, searchTerm) {
+    if (!searchTerm) return true;
+    
+    // Bang-and-pipe mode: use AST evaluation
+    if (tableSearchBangAndPipe) {
+        if (!tableBangAndPipeAST) return false;
+        return evaluateTableAST(tableBangAndPipeAST, text);
+    }
+    
+    // Regex mode with ! prefix for inverse
+    if (tableSearchRegex && searchTerm.startsWith('!') && !searchTerm.startsWith('\\!')) {
+        const pattern = searchTerm.slice(1);
+        if (!pattern) return true; // !empty matches all
+        try {
+            const flags = tableSearchCaseSensitive ? '' : 'i';
+            const regex = new RegExp(pattern, flags);
+            return !regex.test(text);
+        } catch (e) {
+            tableSearchError = 'Invalid regex: ' + e.message;
+            return false;
+        }
+    }
+    
+    // Regex mode with escaped \!
+    let effectivePattern = searchTerm;
+    if (tableSearchRegex && searchTerm.startsWith('\\!')) {
+        effectivePattern = searchTerm.slice(2);
+    }
+    
+    // Standard regex mode
+    if (tableSearchRegex) {
+        try {
+            const flags = tableSearchCaseSensitive ? '' : 'i';
+            const regex = new RegExp(effectivePattern, flags);
+            return regex.test(text);
+        } catch (e) {
+            tableSearchError = 'Invalid regex: ' + e.message;
+            return false;
+        }
+    }
+    
+    // Plain text mode
+    if (tableSearchCaseSensitive) {
+        return text.includes(searchTerm);
+    }
+    return text.toLowerCase().includes(searchTerm.toLowerCase());
+}
+
+/**
+ * Evaluate a Bang & Pipe AST against text for table search
+ * @param {Object} ast - The AST node
+ * @param {string} text - The text to evaluate against
+ * @returns {boolean} - True if the AST matches the text
+ */
+function evaluateTableAST(ast, text) {
+    if (!ast) return false;
+    
+    switch (ast.type) {
+        case 'pattern':
+            // Use the regex field from the AST
+            try {
+                const flags = tableSearchCaseSensitive ? '' : 'i';
+                const regex = new RegExp(ast.regex, flags);
+                return regex.test(text);
+            } catch (e) {
+                return false;
+            }
+        case 'or':
+            return ast.children.some(child => evaluateTableAST(child, text));
+        case 'and':
+            return ast.children.every(child => evaluateTableAST(child, text));
+        case 'not':
+            return !evaluateTableAST(ast.child, text);
+        default:
+            return false;
+    }
 }
 
 // Load services on page load

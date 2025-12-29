@@ -230,6 +230,12 @@ type Service interface {
 - Sortable columns (click header to sort, click again to reverse)
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
+- **Table search**: VS Code-style search widget below filter cards
+  - Filters across all columns (name, project, host, container, status, image, source)
+  - Supports plain text, regex (with `!` prefix for inverse), and Bang & Pipe mode
+  - Case sensitivity toggle
+  - Match count display
+  - Reuses the same AST evaluation as log search
 
 **Status Colors:**
 - 🟢 Green (`badge-running`): Running/active

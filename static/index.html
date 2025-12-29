@@ -55,6 +55,37 @@
             </div>
         </div>
 
+        <!-- Table Search Widget -->
+        <div class="table-search-container mb-3">
+            <div class="table-search-widget-wrapper">
+                <div class="table-search-widget">
+                    <div class="table-search-icon">
+                        <i class="bi bi-search"></i>
+                    </div>
+                    <div class="table-search-input-wrapper">
+                        <input type="text" id="tableSearchInput" class="table-search-input" placeholder="Search services..." oninput="onTableSearchInput(this.value)" onkeydown="onTableSearchKeydown(event)">
+                    </div>
+                    <span class="table-match-count" id="tableMatchCount"></span>
+                    <button class="table-search-btn" id="tableCaseToggle" onclick="toggleTableCaseSensitivity()" title="Match Case">
+                        <span class="case-icon">Aa</span>
+                    </button>
+                    <button class="table-search-btn" id="tableRegexToggle" onclick="toggleTableRegex()" title="Use Regular Expression">
+                        <span class="regex-icon">.*</span>
+                    </button>
+                    <button class="table-search-btn" id="tableBangPipeToggle" onclick="toggleTableBangAndPipe()" title="Bang &amp; Pipe mode: Use !&amp;| operators">
+                        <span class="bangpipe-icon">!&amp;|</span>
+                    </button>
+                    <button class="table-search-btn table-help-btn" onclick="showHelpModal()" title="Query language help">
+                        <i class="bi bi-question-circle"></i>
+                    </button>
+                    <button class="table-search-btn table-clear-btn" id="tableClearBtn" onclick="clearTableSearch()" title="Clear search" style="display: none;">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="table-error-popup hidden" id="tableErrorPopup"></div>
+            </div>
+        </div>
+
         <div class="card">
             <div class="table-responsive">
                 <table class="table table-hover table-striped mb-0">

@@ -572,6 +572,324 @@ describe('evaluateAST - Edge Cases', () => {
 });
 
 // ============================================================================
+// Table Search Functions (extracted from app.js for testing)
+// ============================================================================
+
+let tableSearchCaseSensitive = false;
+let tableSearchRegex = false;
+let tableSearchBangAndPipe = false;
+let tableBangAndPipeAST = null;
+let tableSearchError = '';
+
+function tableTextMatches(text, searchTerm) {
+    if (!searchTerm) return true;
+    
+    // Bang-and-pipe mode: use AST evaluation
+    if (tableSearchBangAndPipe) {
+        if (!tableBangAndPipeAST) return false;
+        return evaluateAST(tableBangAndPipeAST, text);
+    }
+    
+    // Regex mode with ! prefix for inverse
+    if (tableSearchRegex && searchTerm.startsWith('!') && !searchTerm.startsWith('\\!')) {
+        const pattern = searchTerm.slice(1);
+        if (!pattern) return true;
+        try {
+            const flags = tableSearchCaseSensitive ? '' : 'i';
+            const regex = new RegExp(pattern, flags);
+            return !regex.test(text);
+        } catch (e) {
+            tableSearchError = 'Invalid regex: ' + e.message;
+            return false;
+        }
+    }
+    
+    // Regex mode with escaped \!
+    let effectivePattern = searchTerm;
+    if (tableSearchRegex && searchTerm.startsWith('\\!')) {
+        effectivePattern = searchTerm.slice(2);
+    }
+    
+    // Standard regex mode
+    if (tableSearchRegex) {
+        try {
+            const flags = tableSearchCaseSensitive ? '' : 'i';
+            const regex = new RegExp(effectivePattern, flags);
+            return regex.test(text);
+        } catch (e) {
+            tableSearchError = 'Invalid regex: ' + e.message;
+            return false;
+        }
+    }
+    
+    // Plain text mode
+    if (tableSearchCaseSensitive) {
+        return text.includes(searchTerm);
+    }
+    return text.toLowerCase().includes(searchTerm.toLowerCase());
+}
+
+function serviceMatchesTableSearch(service, searchTerm) {
+    if (!searchTerm) return true;
+    
+    const searchableText = [
+        service.name || '',
+        service.project || '',
+        service.host || '',
+        service.container_name || '',
+        service.status || '',
+        service.state || '',
+        service.image || '',
+        service.source || ''
+    ].join(' ');
+    
+    return tableTextMatches(searchableText, searchTerm);
+}
+
+// Reset table search state before each test suite
+function resetTableSearchState() {
+    tableSearchCaseSensitive = false;
+    tableSearchRegex = false;
+    tableSearchBangAndPipe = false;
+    tableBangAndPipeAST = null;
+    tableSearchError = '';
+}
+
+// ============================================================================
+// Table Search Tests
+// ============================================================================
+
+describe('Table Search - Plain Text', () => {
+    test('empty search matches everything', () => {
+        resetTableSearchState();
+        assertEqual(tableTextMatches('any text', ''), true);
+    });
+
+    test('case insensitive by default', () => {
+        resetTableSearchState();
+        assertEqual(tableTextMatches('Docker Container', 'docker'), true);
+        assertEqual(tableTextMatches('DOCKER', 'docker'), true);
+        assertEqual(tableTextMatches('docker', 'DOCKER'), true);
+    });
+
+    test('case sensitive when enabled', () => {
+        resetTableSearchState();
+        tableSearchCaseSensitive = true;
+        assertEqual(tableTextMatches('Docker Container', 'docker'), false);
+        assertEqual(tableTextMatches('Docker Container', 'Docker'), true);
+    });
+
+    test('partial matches work', () => {
+        resetTableSearchState();
+        assertEqual(tableTextMatches('my-container-name', 'container'), true);
+        assertEqual(tableTextMatches('nginx:latest', 'nginx'), true);
+    });
+
+    test('no match returns false', () => {
+        resetTableSearchState();
+        assertEqual(tableTextMatches('docker container', 'systemd'), false);
+    });
+});
+
+describe('Table Search - Regex Mode', () => {
+    test('basic regex pattern', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(tableTextMatches('container-123', 'container-\\d+'), true);
+        assertEqual(tableTextMatches('container-abc', 'container-\\d+'), false);
+    });
+
+    test('regex with anchors', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(tableTextMatches('nginx', '^nginx$'), true);
+        assertEqual(tableTextMatches('my-nginx', '^nginx$'), false);
+    });
+
+    test('regex alternation', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(tableTextMatches('docker', 'docker|systemd'), true);
+        assertEqual(tableTextMatches('systemd', 'docker|systemd'), true);
+        assertEqual(tableTextMatches('podman', 'docker|systemd'), false);
+    });
+
+    test('inverse regex with ! prefix', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(tableTextMatches('systemd', '!docker'), true);
+        assertEqual(tableTextMatches('docker', '!docker'), false);
+    });
+
+    test('escaped ! at start matches literal !', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        // \! escapes the ! prefix - pattern becomes "important", which matches "important"
+        assertEqual(tableTextMatches('!important', '\\!important'), true);
+        // Text without "important" should not match when pattern is "important"
+        assertEqual(tableTextMatches('!other', '\\!important'), false);
+    });
+
+    test('invalid regex returns false', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(tableTextMatches('text', '[invalid'), false);
+    });
+});
+
+describe('Table Search - Bang & Pipe Mode', () => {
+    test('simple pattern with AST', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = { type: 'pattern', pattern: 'docker', regex: 'docker' };
+        assertEqual(tableTextMatches('docker container', 'docker'), true);
+        assertEqual(tableTextMatches('systemd unit', 'docker'), false);
+    });
+
+    test('OR expression', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = {
+            type: 'or',
+            children: [
+                { type: 'pattern', pattern: 'docker', regex: 'docker' },
+                { type: 'pattern', pattern: 'systemd', regex: 'systemd' }
+            ]
+        };
+        assertEqual(tableTextMatches('docker', 'ignored'), true);
+        assertEqual(tableTextMatches('systemd', 'ignored'), true);
+        assertEqual(tableTextMatches('podman', 'ignored'), false);
+    });
+
+    test('AND expression', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = {
+            type: 'and',
+            children: [
+                { type: 'pattern', pattern: 'docker', regex: 'docker' },
+                { type: 'pattern', pattern: 'running', regex: 'running' }
+            ]
+        };
+        assertEqual(tableTextMatches('docker running', 'ignored'), true);
+        assertEqual(tableTextMatches('docker stopped', 'ignored'), false);
+        assertEqual(tableTextMatches('systemd running', 'ignored'), false);
+    });
+
+    test('NOT expression', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = {
+            type: 'not',
+            child: { type: 'pattern', pattern: 'stopped', regex: 'stopped' }
+        };
+        assertEqual(tableTextMatches('running', 'ignored'), true);
+        assertEqual(tableTextMatches('stopped', 'ignored'), false);
+    });
+
+    test('returns false without valid AST', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = null;
+        assertEqual(tableTextMatches('docker', 'docker'), false);
+    });
+});
+
+describe('Table Search - Service Matching', () => {
+    const sampleService = {
+        name: 'nginx',
+        project: 'web-stack',
+        host: 'nas',
+        container_name: 'web-nginx-1',
+        status: 'running (healthy)',
+        state: 'running',
+        image: 'nginx:1.25-alpine',
+        source: 'docker'
+    };
+
+    test('matches service name', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'nginx'), true);
+    });
+
+    test('matches project', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'web-stack'), true);
+    });
+
+    test('matches host', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'nas'), true);
+    });
+
+    test('matches container name', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'web-nginx-1'), true);
+    });
+
+    test('matches status', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'healthy'), true);
+    });
+
+    test('matches state', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'running'), true);
+    });
+
+    test('matches image', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'alpine'), true);
+    });
+
+    test('matches source', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'docker'), true);
+    });
+
+    test('no match returns false', () => {
+        resetTableSearchState();
+        assertEqual(serviceMatchesTableSearch(sampleService, 'postgresql'), false);
+    });
+
+    test('handles missing fields gracefully', () => {
+        resetTableSearchState();
+        const minimalService = { name: 'test' };
+        assertEqual(serviceMatchesTableSearch(minimalService, 'test'), true);
+        assertEqual(serviceMatchesTableSearch(minimalService, 'missing'), false);
+    });
+
+    test('regex matching on services', () => {
+        resetTableSearchState();
+        tableSearchRegex = true;
+        assertEqual(serviceMatchesTableSearch(sampleService, 'nginx.*alpine'), true);
+        assertEqual(serviceMatchesTableSearch(sampleService, '^nas$'), false); // Not anchored to start
+    });
+
+    test('bang and pipe on services', () => {
+        resetTableSearchState();
+        tableSearchBangAndPipe = true;
+        tableBangAndPipeAST = {
+            type: 'and',
+            children: [
+                { type: 'pattern', pattern: 'docker', regex: 'docker' },
+                { type: 'pattern', pattern: 'running', regex: 'running' }
+            ]
+        };
+        assertEqual(serviceMatchesTableSearch(sampleService, 'docker & running'), true);
+        
+        tableBangAndPipeAST = {
+            type: 'and',
+            children: [
+                { type: 'pattern', pattern: 'systemd', regex: 'systemd' },
+                { type: 'pattern', pattern: 'running', regex: 'running' }
+            ]
+        };
+        assertEqual(serviceMatchesTableSearch(sampleService, 'systemd & running'), false);
+    });
+});
+
+// ============================================================================
 // Run tests and report
 // ============================================================================
 

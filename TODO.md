@@ -12,6 +12,7 @@
 | break up main.go, there's unique functionality that should be isolated. seperation of concerns and all. | ✅ Done |
 | Logs should have a text search for each log window that is open | ✅ Done |
 | service type (systemd/docker) should be filterable | ✅ Done |
+| BangAndPipe search should apply to services rendered in the table of services | ✅ Done |
 | If the service exposes ports, not to localhost, but to any IP, I want a list of those after the service name, which on click opens that port as HTTP | ⬜ |
 | Write a systemd unit for this service and start it when the server starts. include a script to compile and install this binary, as well as uninstall. the config path should be configurable, and /etc/nas_dashboard/services.json should be the default path, with sample.services.json copied into that folder | ⬜ |
 | all services rendered should have a start/stop/restart button. on docker, restart should down/up and not simply do a restart | ⬜ |
