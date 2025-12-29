@@ -95,6 +95,87 @@ The dashboard displays descriptions for services when available:
 
 - **Systemd**: Descriptions are automatically fetched from the unit's `Description` field.
 
+## Service Control Setup
+
+The dashboard can start, stop, and restart services. This requires proper authentication setup.
+
+### SSH Key Authentication (Remote Hosts)
+
+For remote systemd hosts, SSH key-based authentication must be configured:
+
+```bash
+# Generate an SSH key if you don't have one
+ssh-keygen -t ed25519 -C "dashboard"
+
+# Copy the key to remote hosts
+ssh-copy-id user@192.168.1.9
+```
+
+### Sudoers Configuration
+
+Systemctl commands require root privileges. Configure passwordless sudo for only the specific services you want to manage.
+
+**Generate sudoers configuration automatically from your `services.json`:**
+
+```bash
+# Generate for current user
+./dashboard -generate-sudoers
+
+# Generate for a specific user
+./dashboard -generate-sudoers -sudoers-user myuser
+```
+
+This outputs a sudoers configuration based on your configured systemd services. Install it with:
+
+```bash
+./dashboard -generate-sudoers | sudo tee /etc/sudoers.d/home-server-dashboard
+sudo chmod 440 /etc/sudoers.d/home-server-dashboard
+```
+
+For remote hosts, copy the relevant lines to each remote machine's `/etc/sudoers.d/home-server-dashboard`.
+
+**Manual configuration** (if preferred):
+
+On each host (local and remote), create a sudoers file:
+
+```bash
+sudo visudo -f /etc/sudoers.d/home-server-dashboard
+```
+
+Add rules for the specific services (replace `youruser` and service names):
+
+```sudoers
+# Allow dashboard user to manage specific systemd services without password
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ollama.service
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop ollama.service
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ollama.service
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl start docker.service
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop docker.service
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart docker.service
+```
+
+**Or use a pattern to allow all systemctl operations on specific services:**
+
+```sudoers
+# Allow start/stop/restart for specific services
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ollama.service, \
+                             /usr/bin/systemctl stop ollama.service, \
+                             /usr/bin/systemctl restart ollama.service
+```
+
+**For Docker containers**, the user running the dashboard needs to be in the `docker` group:
+
+```bash
+sudo usermod -aG docker youruser
+# Log out and back in for group changes to take effect
+```
+
+### Security Considerations
+
+- **Principle of Least Privilege**: Only grant sudo access to the specific services listed in your `services.json`
+- **Avoid wildcards**: Don't use `systemctl *` patterns in sudoers
+- **SSH hardening**: Consider using a dedicated SSH key for the dashboard and restricting it with `ForceCommand` if needed
+
 ## License
 
 GPLv3

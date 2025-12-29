@@ -729,3 +729,119 @@ th.sortable:hover {
     color: inherit;
     border-radius: 2px;
 }
+
+/* Service Control Buttons */
+.service-controls {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 8px;
+}
+
+.service-control-btn {
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.service-control-btn:hover {
+    transform: scale(1.1);
+}
+
+.service-control-btn.btn-start {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+}
+
+.service-control-btn.btn-start:hover {
+    background: rgba(46, 204, 113, 0.4);
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.4);
+}
+
+.service-control-btn.btn-stop {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+}
+
+.service-control-btn.btn-stop:hover {
+    background: rgba(231, 76, 60, 0.4);
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.4);
+}
+
+.service-control-btn.btn-restart {
+    background: rgba(52, 152, 219, 0.2);
+    color: #3498db;
+}
+
+.service-control-btn.btn-restart:hover {
+    background: rgba(52, 152, 219, 0.4);
+    box-shadow: 0 0 8px rgba(52, 152, 219, 0.4);
+}
+
+/* Action Modal Styles */
+.action-status-container {
+    margin-top: 16px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.action-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #0f3460;
+    border-bottom: 1px solid #30363d;
+}
+
+.action-status-title {
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.action-status-log {
+    background: #0d1117;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.action-log-line {
+    padding: 2px 0;
+    color: #aaa;
+}
+
+.action-log-line.status {
+    color: #58a6ff;
+}
+
+.action-log-line.error {
+    color: #f48771;
+}
+
+.action-log-line.success {
+    color: #2ecc71;
+}
+
+.action-countdown {
+    padding: 12px;
+    text-align: center;
+    background: #0f3460;
+    border-top: 1px solid #30363d;
+    font-size: 0.875rem;
+    color: #58a6ff;
+}
+
+.action-countdown #countdownValue {
+    font-weight: bold;
+    font-size: 1.1em;
+}

@@ -363,17 +363,27 @@ func (s *SystemdService) Restart(ctx context.Context) error {
 }
 
 // runSystemctl runs a systemctl command on the unit.
+// Requires sudo access for the user running the dashboard.
+// See README.md for sudoers configuration.
 func (s *SystemdService) runSystemctl(ctx context.Context, action string) error {
 	var cmd *exec.Cmd
 
 	if s.isLocal {
-		cmd = exec.CommandContext(ctx, "systemctl", action, s.unitName)
+		cmd = exec.CommandContext(ctx, "sudo", "systemctl", action, s.unitName)
 	} else {
 		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-			s.address, "systemctl", action, s.unitName)
+			s.address, "sudo", "systemctl", action, s.unitName)
 	}
 
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
+		if outputStr != "" {
+			return fmt.Errorf("%w: %s", err, outputStr)
+		}
+		return err
+	}
+	return nil
 }
 
 // GetName returns the unit name.

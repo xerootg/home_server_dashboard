@@ -396,3 +396,233 @@ func TestBangAndPipeDocsHandler_NotFound(t *testing.T) {
 		t.Errorf("Expected status 404, got %d", w.Code)
 	}
 }
+
+// TestServiceActionHandler_MethodNotAllowed tests that GET is rejected.
+func TestServiceActionHandler_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/services/start", nil)
+	w := httptest.NewRecorder()
+
+	ServiceActionHandler(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+// TestServiceActionHandler_InvalidAction tests that invalid actions are rejected.
+func TestServiceActionHandler_InvalidAction(t *testing.T) {
+	body := strings.NewReader(`{"container_name": "test", "service_name": "test", "source": "docker"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/services/invalid", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ServiceActionHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(w.Body.String(), "Invalid action") {
+		t.Errorf("Expected 'Invalid action' in body, got: %s", w.Body.String())
+	}
+}
+
+// TestServiceActionHandler_InvalidJSON tests that invalid JSON is rejected.
+func TestServiceActionHandler_InvalidJSON(t *testing.T) {
+	body := strings.NewReader(`{invalid json}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/services/start", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ServiceActionHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(w.Body.String(), "Invalid request body") {
+		t.Errorf("Expected 'Invalid request body' in body, got: %s", w.Body.String())
+	}
+}
+
+// TestServiceActionHandler_SSEHeaders tests that SSE headers are set.
+func TestServiceActionHandler_SSEHeaders(t *testing.T) {
+	configJSON := `{
+		"hosts": [
+			{
+				"name": "localhost",
+				"address": "localhost",
+				"systemd_services": [],
+				"docker_compose_roots": []
+			}
+		]
+	}`
+
+	cleanup := setupTestConfig(t, configJSON)
+	defer cleanup()
+
+	body := strings.NewReader(`{"container_name": "test-container", "service_name": "test", "source": "docker", "host": "localhost"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/services/start", body)
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Use a context that will be cancelled immediately
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	ServiceActionHandler(w, req)
+
+	// Check SSE headers
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %v, want text/event-stream", ct)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control = %v, want no-cache", cc)
+	}
+	if conn := w.Header().Get("Connection"); conn != "keep-alive" {
+		t.Errorf("Connection = %v, want keep-alive", conn)
+	}
+}
+
+// TestServiceActionHandler_UnknownSource tests that unknown source is rejected.
+func TestServiceActionHandler_UnknownSource(t *testing.T) {
+	configJSON := `{
+		"hosts": [
+			{
+				"name": "localhost",
+				"address": "localhost",
+				"systemd_services": [],
+				"docker_compose_roots": []
+			}
+		]
+	}`
+
+	cleanup := setupTestConfig(t, configJSON)
+	defer cleanup()
+
+	body := strings.NewReader(`{"container_name": "test", "service_name": "test", "source": "unknown", "host": "localhost"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/services/start", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ServiceActionHandler(w, req)
+
+	// Check SSE headers are set
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %v, want text/event-stream", ct)
+	}
+
+	// Check response contains error about unknown source
+	responseBody := w.Body.String()
+	if !strings.Contains(responseBody, "Unknown service source") {
+		t.Errorf("Expected 'Unknown service source' in body, got: %s", responseBody)
+	}
+}
+
+// TestServiceActionHandler_ValidActions tests that valid actions are accepted.
+func TestServiceActionHandler_ValidActions(t *testing.T) {
+	configJSON := `{
+		"hosts": [
+			{
+				"name": "localhost",
+				"address": "localhost",
+				"systemd_services": [],
+				"docker_compose_roots": []
+			}
+		]
+	}`
+
+	cleanup := setupTestConfig(t, configJSON)
+	defer cleanup()
+
+	actions := []string{"start", "stop", "restart"}
+	for _, action := range actions {
+		t.Run(action, func(t *testing.T) {
+			body := strings.NewReader(`{"container_name": "test-container", "service_name": "test", "source": "docker", "host": "localhost"}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/services/"+action, body)
+			req.Header.Set("Content-Type", "application/json")
+
+			// Use a context that will be cancelled immediately
+			ctx, cancel := context.WithCancel(req.Context())
+			cancel()
+			req = req.WithContext(ctx)
+
+			w := httptest.NewRecorder()
+
+			ServiceActionHandler(w, req)
+
+			// Should set SSE headers (handler accepted the action)
+			if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+				t.Errorf("Content-Type = %v, want text/event-stream for action %s", ct, action)
+			}
+		})
+	}
+}
+
+// TestFindComposeFile tests the compose file detection function.
+func TestFindComposeFile(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Test with no compose file
+	result := findComposeFile(tempDir)
+	if result != "" {
+		t.Errorf("Expected empty string for empty dir, got: %s", result)
+	}
+
+	// Test with docker-compose.yml
+	composePath := filepath.Join(tempDir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("version: '3'"), 0644); err != nil {
+		t.Fatalf("Failed to create compose file: %v", err)
+	}
+
+	result = findComposeFile(tempDir)
+	if result != composePath {
+		t.Errorf("Expected %s, got: %s", composePath, result)
+	}
+
+	// Remove and test with compose.yml
+	os.Remove(composePath)
+	composePath2 := filepath.Join(tempDir, "compose.yml")
+	if err := os.WriteFile(composePath2, []byte("version: '3'"), 0644); err != nil {
+		t.Fatalf("Failed to create compose file: %v", err)
+	}
+
+	result = findComposeFile(tempDir)
+	if result != composePath2 {
+		t.Errorf("Expected %s, got: %s", composePath2, result)
+	}
+}
+
+// TestServiceActionRequest_JSONParsing tests JSON parsing of request body.
+func TestServiceActionRequest_JSONParsing(t *testing.T) {
+	jsonStr := `{
+		"container_name": "test-container",
+		"service_name": "test-service",
+		"source": "docker",
+		"host": "localhost",
+		"project": "myproject"
+	}`
+
+	var req ServiceActionRequest
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("Failed to parse JSON: %v", err)
+	}
+
+	if req.ContainerName != "test-container" {
+		t.Errorf("ContainerName = %s, want test-container", req.ContainerName)
+	}
+	if req.ServiceName != "test-service" {
+		t.Errorf("ServiceName = %s, want test-service", req.ServiceName)
+	}
+	if req.Source != "docker" {
+		t.Errorf("Source = %s, want docker", req.Source)
+	}
+	if req.Host != "localhost" {
+		t.Errorf("Host = %s, want localhost", req.Host)
+	}
+	if req.Project != "myproject" {
+		t.Errorf("Project = %s, want myproject", req.Project)
+	}
+}

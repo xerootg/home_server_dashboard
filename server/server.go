@@ -60,6 +60,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/logs/systemd", handlers.SystemdLogsHandler)
 	s.mux.HandleFunc("/api/bangAndPipeToRegex", handlers.BangAndPipeHandler)
 	s.mux.HandleFunc("/api/docs/bangandpipe", handlers.BangAndPipeDocsHandler)
+
+	// Service control actions (start/stop/restart)
+	s.mux.HandleFunc("/api/services/start", handlers.ServiceActionHandler)
+	s.mux.HandleFunc("/api/services/stop", handlers.ServiceActionHandler)
+	s.mux.HandleFunc("/api/services/restart", handlers.ServiceActionHandler)
 }
 
 // Handler returns the HTTP handler for the server.

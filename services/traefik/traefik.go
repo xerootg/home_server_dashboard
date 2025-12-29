@@ -194,6 +194,11 @@ func (c *Client) GetRouters(ctx context.Context) ([]Router, error) {
 // Supports both single and double quotes, and backticks.
 var hostPattern = regexp.MustCompile(`Host\s*\(\s*[\x60"']([^)\x60"']+)[\x60"']\s*\)`)
 
+// warnedHostRegexp tracks which routers have already logged HostRegexp warnings
+// to avoid spamming logs on every refresh.
+var warnedHostRegexp = make(map[string]bool)
+var warnedHostRegexpMu sync.Mutex
+
 // ExtractHostnames extracts all hostnames from a Traefik rule string.
 // Handles rules like: Host(`example.com`), Host(`a.com`) || Host(`b.com`)
 func ExtractHostnames(rule string) []string {
@@ -228,8 +233,14 @@ func (c *Client) GetServiceHostMappings(ctx context.Context) (map[string][]strin
 		}
 
 		// Warn about HostRegexp patterns - we can't reliably extract hostnames from regex
+		// Only log once per router to avoid log spam on refreshes
 		if strings.Contains(router.Rule, "HostRegexp") {
-			log.Printf("Warning: router %q uses HostRegexp which cannot be extracted as a static hostname", router.Name)
+			warnedHostRegexpMu.Lock()
+			if !warnedHostRegexp[router.Name] {
+				warnedHostRegexp[router.Name] = true
+				log.Printf("Warning: router %q uses HostRegexp which cannot be extracted as a static hostname. Rule: %s", router.Name, router.Rule)
+			}
+			warnedHostRegexpMu.Unlock()
 		}
 
 		hostnames := ExtractHostnames(router.Rule)

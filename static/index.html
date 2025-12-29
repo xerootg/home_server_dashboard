@@ -97,6 +97,7 @@
                             <th data-sort="container" onclick="toggleSort('container')" class="sortable">Container<span class="sort-indicator"></span></th>
                             <th data-sort="status" onclick="toggleSort('status')" class="sortable">Status<span class="sort-indicator"></span></th>
                             <th data-sort="image" onclick="toggleSort('image')" class="sortable">Image<span class="sort-indicator"></span></th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="servicesTable">
@@ -129,6 +130,35 @@
                             <span class="visually-hidden">Loading...</span>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Action Confirmation Modal -->
+    <div class="modal fade" id="actionModal" tabindex="-1" aria-labelledby="actionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="actionModalLabel"><i class="bi bi-exclamation-triangle-fill text-warning"></i> Confirm Action</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="actionModalMessage">Are you sure you want to perform this action?</p>
+                    <div id="actionModalStatus" class="action-status-container" style="display: none;">
+                        <div class="action-status-header">
+                            <span class="action-status-title">Status</span>
+                            <span class="action-status-spinner spinner-border spinner-border-sm" id="actionSpinner"></span>
+                        </div>
+                        <div class="action-status-log" id="actionStatusLog"></div>
+                        <div class="action-countdown" id="actionCountdown" style="display: none;">
+                            Refreshing in <span id="countdownValue">5</span>...
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary" id="actionModalFooter">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="actionModalConfirm">Yes, proceed</button>
                 </div>
             </div>
         </div>

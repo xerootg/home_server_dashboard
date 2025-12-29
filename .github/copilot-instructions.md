@@ -68,6 +68,9 @@ home_server_dashboard/
   - `DockerLogsHandler` — SSE stream for Docker container logs
   - `SystemdLogsHandler` — SSE stream for systemd unit logs
   - `IndexHandler` — Serves the main dashboard page
+  - `ServiceActionHandler` — Handles start/stop/restart actions with SSE status updates
+- **Key Types:**
+  - `ServiceActionRequest` — Request body for service control actions
 - **Internal:** `getAllServices()` aggregates services from all providers
 
 ### `server` Package
@@ -182,6 +185,9 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
 - `GET /api/bangAndPipeToRegex?expr=<expr>` — Compiles Bang & Pipe expression to AST
 - `GET /api/docs/bangandpipe` — Returns rendered HTML documentation for Bang & Pipe syntax
+- `POST /api/services/start` — Start a service (SSE stream of status updates)
+- `POST /api/services/stop` — Stop a service (SSE stream of status updates)
+- `POST /api/services/restart` — Restart a service (Docker uses compose down/up, SSE stream of status updates)
 
 **Application Layers:**
 | Layer | Package | Responsibility |
@@ -277,6 +283,11 @@ type Service interface {
   - Case sensitivity toggle
   - Match count display
   - Reuses the same AST evaluation as log search
+- **Service control buttons**: Start/Stop/Restart buttons in Actions column
+  - Shows confirmation modal before executing action
+  - Real-time status updates via SSE during action execution
+  - Docker restart uses `docker compose down/up` instead of simple restart
+  - Auto-refreshes service data after successful action (5 second countdown)
 
 **Status Colors:**
 - 🟢 Green (`badge-running`): Running/active

@@ -10,7 +10,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
@@ -350,4 +353,288 @@ func BangAndPipeDocsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(htmlContent)
+}
+
+// ServiceActionRequest represents the request body for service actions.
+type ServiceActionRequest struct {
+	ContainerName string `json:"container_name"`
+	ServiceName   string `json:"service_name"`
+	Source        string `json:"source"`
+	Host          string `json:"host"`
+	Project       string `json:"project"`
+}
+
+// ServiceActionHandler handles POST /api/services/action requests for start/stop/restart.
+// It streams status updates via SSE.
+func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse action from URL path
+	path := r.URL.Path
+	action := strings.TrimPrefix(path, "/api/services/")
+	if action != "start" && action != "stop" && action != "restart" {
+		http.Error(w, "Invalid action. Must be start, stop, or restart", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req ServiceActionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Helper to send SSE events
+	sendEvent := func(eventType, message string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, message)
+		flusher.Flush()
+	}
+
+	sendEvent("status", fmt.Sprintf("Starting %s action on %s...", action, req.ServiceName))
+
+	cfg := config.Get()
+	var err error
+
+	if req.Source == "docker" {
+		err = handleDockerAction(ctx, cfg, req, action, sendEvent)
+	} else if req.Source == "systemd" {
+		err = handleSystemdAction(ctx, cfg, req, action, sendEvent)
+	} else {
+		sendEvent("error", "Unknown service source: "+req.Source)
+		sendEvent("complete", "failed")
+		return
+	}
+
+	if err != nil {
+		log.Printf("Service action failed: action=%s service=%s source=%s host=%s error=%v",
+			action, req.ServiceName, req.Source, req.Host, err)
+		sendEvent("error", err.Error())
+		sendEvent("complete", "failed")
+		return
+	}
+
+	sendEvent("status", fmt.Sprintf("Action '%s' completed successfully", action))
+	sendEvent("complete", "success")
+}
+
+// handleDockerAction performs Docker container actions.
+// For restart, it uses docker-compose down/up instead of simple restart.
+func handleDockerAction(ctx context.Context, cfg *config.Config, req ServiceActionRequest, action string, sendEvent func(string, string)) error {
+	localHostName := "localhost"
+	if cfg != nil {
+		localHostName = cfg.GetLocalHostName()
+	}
+
+	// For restart, use docker-compose down/up
+	if action == "restart" {
+		return handleDockerComposeRestart(ctx, cfg, req, sendEvent)
+	}
+
+	// For start/stop, use Docker API
+	dockerProvider, err := docker.NewProvider(localHostName)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker provider: %w", err)
+	}
+	defer dockerProvider.Close()
+
+	svc, err := dockerProvider.GetService(req.ContainerName)
+	if err != nil {
+		return fmt.Errorf("failed to get service: %w", err)
+	}
+
+	sendEvent("status", fmt.Sprintf("Executing %s on container %s...", action, req.ContainerName))
+
+	switch action {
+	case "start":
+		err = svc.Start(ctx)
+	case "stop":
+		err = svc.Stop(ctx)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to %s container: %w", action, err)
+	}
+
+	return nil
+}
+
+// handleDockerComposeRestart performs docker-compose down/up for a service.
+func handleDockerComposeRestart(ctx context.Context, cfg *config.Config, req ServiceActionRequest, sendEvent func(string, string)) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+
+	// Find the compose root for this project
+	var composeRoot string
+	for _, host := range cfg.Hosts {
+		if !host.IsLocal() {
+			continue
+		}
+		for _, root := range host.DockerComposeRoots {
+			// Check if this root contains the project
+			// Docker Compose project name is typically the directory name
+			// or specified in compose file
+			testPath := filepath.Join(root, req.Project)
+			if _, err := os.Stat(testPath); err == nil {
+				composeRoot = testPath
+				break
+			}
+			// Also check if the root itself is the project directory
+			if filepath.Base(root) == req.Project || strings.TrimSuffix(filepath.Base(root), "/") == req.Project {
+				composeRoot = root
+				break
+			}
+		}
+		if composeRoot != "" {
+			break
+		}
+	}
+
+	// If we couldn't find a specific project directory, try to find compose file
+	// by checking each compose root for a docker-compose.yml that contains the service
+	if composeRoot == "" {
+		for _, host := range cfg.Hosts {
+			if !host.IsLocal() {
+				continue
+			}
+			for _, root := range host.DockerComposeRoots {
+				composeFile := findComposeFile(root)
+				if composeFile != "" {
+					composeRoot = filepath.Dir(composeFile)
+					break
+				}
+			}
+			if composeRoot != "" {
+				break
+			}
+		}
+	}
+
+	if composeRoot == "" {
+		// Fall back to simple docker restart if we can't find compose root
+		sendEvent("status", "Could not find docker-compose root, falling back to simple restart...")
+		return handleDockerSimpleRestart(ctx, cfg, req, sendEvent)
+	}
+
+	sendEvent("status", fmt.Sprintf("Found compose root: %s", composeRoot))
+
+	// Run docker-compose down for the specific service
+	sendEvent("status", fmt.Sprintf("Running docker compose down for %s...", req.ServiceName))
+	
+	downCmd := exec.CommandContext(ctx, "docker", "compose", "down", req.ServiceName)
+	downCmd.Dir = composeRoot
+	downOutput, err := downCmd.CombinedOutput()
+	if err != nil {
+		// Log but don't fail - service might not be running
+		sendEvent("status", fmt.Sprintf("Down output: %s", strings.TrimSpace(string(downOutput))))
+	} else if len(downOutput) > 0 {
+		sendEvent("status", strings.TrimSpace(string(downOutput)))
+	}
+
+	// Brief pause to ensure cleanup
+	time.Sleep(500 * time.Millisecond)
+
+	// Run docker-compose up for the specific service
+	sendEvent("status", fmt.Sprintf("Running docker compose up -d for %s...", req.ServiceName))
+	
+	upCmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d", req.ServiceName)
+	upCmd.Dir = composeRoot
+	upOutput, err := upCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker compose up failed: %s - %w", strings.TrimSpace(string(upOutput)), err)
+	}
+	if len(upOutput) > 0 {
+		sendEvent("status", strings.TrimSpace(string(upOutput)))
+	}
+
+	return nil
+}
+
+// handleDockerSimpleRestart falls back to Docker API restart if compose is not available.
+func handleDockerSimpleRestart(ctx context.Context, cfg *config.Config, req ServiceActionRequest, sendEvent func(string, string)) error {
+	localHostName := "localhost"
+	if cfg != nil {
+		localHostName = cfg.GetLocalHostName()
+	}
+
+	dockerProvider, err := docker.NewProvider(localHostName)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker provider: %w", err)
+	}
+	defer dockerProvider.Close()
+
+	svc, err := dockerProvider.GetService(req.ContainerName)
+	if err != nil {
+		return fmt.Errorf("failed to get service: %w", err)
+	}
+
+	sendEvent("status", fmt.Sprintf("Restarting container %s...", req.ContainerName))
+	return svc.Restart(ctx)
+}
+
+// findComposeFile looks for docker-compose.yml or compose.yml in the given directory.
+func findComposeFile(dir string) string {
+	candidates := []string{
+		filepath.Join(dir, "docker-compose.yml"),
+		filepath.Join(dir, "docker-compose.yaml"),
+		filepath.Join(dir, "compose.yml"),
+		filepath.Join(dir, "compose.yaml"),
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+// handleSystemdAction performs systemd service actions.
+func handleSystemdAction(ctx context.Context, cfg *config.Config, req ServiceActionRequest, action string, sendEvent func(string, string)) error {
+	// Find the host config
+	hostAddress := "localhost"
+	if cfg != nil {
+		if host := cfg.GetHostByName(req.Host); host != nil {
+			hostAddress = host.Address
+		}
+	}
+
+	systemdProvider := systemd.NewProvider(req.Host, hostAddress, []string{req.ServiceName})
+	svc, err := systemdProvider.GetService(req.ServiceName)
+	if err != nil {
+		return fmt.Errorf("failed to get service: %w", err)
+	}
+
+	sendEvent("status", fmt.Sprintf("Executing %s on unit %s...", action, req.ServiceName))
+
+	switch action {
+	case "start":
+		err = svc.Start(ctx)
+	case "stop":
+		err = svc.Stop(ctx)
+	case "restart":
+		err = svc.Restart(ctx)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to %s unit: %w", action, err)
+	}
+
+	return nil
 }
