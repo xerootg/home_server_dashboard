@@ -2,6 +2,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"home_server_dashboard/config"
@@ -39,5 +40,49 @@ func TestServerCreation(t *testing.T) {
 	handler := srv.Handler()
 	if handler == nil {
 		t.Fatal("Expected non-nil handler")
+	}
+}
+
+// TestGetConfigPath verifies config path resolution from environment variable.
+func TestGetConfigPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     string
+	}{
+		{
+			name:     "default when env not set",
+			envValue: "",
+			want:     "services.json",
+		},
+		{
+			name:     "uses env value when set",
+			envValue: "/etc/nas_dashboard/services.json",
+			want:     "/etc/nas_dashboard/services.json",
+		},
+		{
+			name:     "uses custom path",
+			envValue: "/custom/path/config.json",
+			want:     "/custom/path/config.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore original env value
+			original := os.Getenv("CONFIG_PATH")
+			defer os.Setenv("CONFIG_PATH", original)
+
+			if tt.envValue == "" {
+				os.Unsetenv("CONFIG_PATH")
+			} else {
+				os.Setenv("CONFIG_PATH", tt.envValue)
+			}
+
+			got := getConfigPath()
+			if got != tt.want {
+				t.Errorf("getConfigPath() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

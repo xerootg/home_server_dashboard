@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +27,18 @@ import (
 	"home_server_dashboard/services/systemd"
 	"home_server_dashboard/services/traefik"
 )
+
+// Embedded filesystems (set by server package)
+var (
+	embeddedStaticFS fs.FS
+	embeddedDocsFS   fs.FS
+)
+
+// SetEmbeddedFS sets the embedded filesystems for serving static content.
+func SetEmbeddedFS(staticFS, docsFS fs.FS) {
+	embeddedStaticFS = staticFS
+	embeddedDocsFS = docsFS
+}
 
 // getAllServices collects services from all configured providers.
 func getAllServices(ctx context.Context, cfg *config.Config) ([]services.ServiceInfo, error) {
@@ -380,6 +393,16 @@ func DockerLogsHandler(w http.ResponseWriter, r *http.Request) {
 // IndexHandler serves the main dashboard page.
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
+		// Try embedded filesystem first
+		if embeddedStaticFS != nil {
+			content, err := fs.ReadFile(embeddedStaticFS, "index.html")
+			if err == nil {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Write(content)
+				return
+			}
+		}
+		// Fallback to filesystem for development
 		http.ServeFile(w, r, "static/index.html")
 		return
 	}
@@ -400,11 +423,21 @@ func BangAndPipeHandler(w http.ResponseWriter, r *http.Request) {
 // BangAndPipeDocsHandler handles GET /api/docs/bangandpipe requests.
 // It renders the BangAndPipe query language documentation as HTML.
 func BangAndPipeDocsHandler(w http.ResponseWriter, r *http.Request) {
-	// Read the markdown file
-	mdContent, err := os.ReadFile("docs/bangandpipe-query-language.md")
-	if err != nil {
-		http.Error(w, "Documentation not found", http.StatusNotFound)
-		return
+	var mdContent []byte
+	var err error
+
+	// Try embedded filesystem first
+	if embeddedDocsFS != nil {
+		mdContent, err = fs.ReadFile(embeddedDocsFS, "bangandpipe-query-language.md")
+	}
+
+	// Fallback to filesystem for development
+	if err != nil || embeddedDocsFS == nil {
+		mdContent, err = os.ReadFile("docs/bangandpipe-query-language.md")
+		if err != nil {
+			http.Error(w, "Documentation not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	// Create markdown parser with extensions

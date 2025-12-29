@@ -46,11 +46,31 @@ cp sample.services.json services.json
 3. Build and run:
 
 ```bash
-go build -o dashboard
-./dashboard
+go run .
+# or
+go build -o nas-dashboard && ./nas-dashboard
 ```
 
 4. Open http://localhost:9001 in your browser.
+
+## Installation
+
+Install as a systemd service:
+
+```bash
+sudo ./install.sh [username]
+```
+
+- Compiles and installs binary to `/usr/local/bin/nas-dashboard`
+- Copies `services.json` (or `sample.services.json`) to `/etc/nas_dashboard/services.json`
+- Installs and enables the systemd service
+- `username` defaults to the user who invoked sudo
+
+Uninstall:
+
+```bash
+sudo ./uninstall.sh
+```
 
 ## How It Works
 

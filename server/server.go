@@ -2,6 +2,7 @@
 package server
 
 import (
+	"io/fs"
 	"log"
 	"net/http"
 
@@ -11,8 +12,10 @@ import (
 // Config holds server configuration options.
 type Config struct {
 	Port       string
-	StaticDir  string
+	StaticDir  string // Deprecated: use StaticFS instead
 	ConfigPath string
+	StaticFS   fs.FS  // Embedded static filesystem
+	DocsFS     fs.FS  // Embedded docs filesystem
 }
 
 // DefaultConfig returns the default server configuration.
@@ -47,9 +50,18 @@ func New(cfg *Config) *Server {
 
 // setupRoutes configures all HTTP routes.
 func (s *Server) setupRoutes() {
-	// Serve static files
-	fs := http.FileServer(http.Dir(s.config.StaticDir))
-	s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	// Serve static files from embedded filesystem
+	if s.config.StaticFS != nil {
+		fs := http.FileServer(http.FS(s.config.StaticFS))
+		s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	} else {
+		// Fallback to filesystem for development
+		fs := http.FileServer(http.Dir(s.config.StaticDir))
+		s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	}
+
+	// Set the embedded filesystems for handlers
+	handlers.SetEmbeddedFS(s.config.StaticFS, s.config.DocsFS)
 
 	// Serve index.html at root
 	s.mux.HandleFunc("/", handlers.IndexHandler)

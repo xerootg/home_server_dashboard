@@ -13,6 +13,15 @@ import (
 	"home_server_dashboard/sudoers"
 )
 
+// getConfigPath returns the configuration file path.
+// Priority: CONFIG_PATH env var > default "services.json" in current directory
+func getConfigPath() string {
+	if path := os.Getenv("CONFIG_PATH"); path != "" {
+		return path
+	}
+	return "services.json"
+}
+
 func main() {
 	// Parse command line flags
 	generateSudoersFlag := flag.Bool("generate-sudoers", false, "Generate sudoers configuration for systemd services and exit")
@@ -20,9 +29,10 @@ func main() {
 	flag.Parse()
 
 	// Load configuration
-	cfg, err := config.Load("services.json")
+	configPath := getConfigPath()
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatalf("Failed to load configuration from %s: %v", configPath, err)
 	}
 
 	// Handle sudoers generation
@@ -49,10 +59,23 @@ func main() {
 		os.Exit(0)
 	}
 
-	log.Printf("Loaded config with %d hosts", len(cfg.Hosts))
+	log.Printf("Loaded config from %s with %d hosts", configPath, len(cfg.Hosts))
+
+	// Create server config with embedded filesystems
+	serverCfg := server.DefaultConfig()
+	staticFS, err := getStaticFS()
+	if err != nil {
+		log.Fatalf("Failed to get embedded static filesystem: %v", err)
+	}
+	docsFS, err := getDocsFS()
+	if err != nil {
+		log.Fatalf("Failed to get embedded docs filesystem: %v", err)
+	}
+	serverCfg.StaticFS = staticFS
+	serverCfg.DocsFS = docsFS
 
 	// Create and start server
-	srv := server.New(server.DefaultConfig())
+	srv := server.New(serverCfg)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}

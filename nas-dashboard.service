@@ -1,0 +1,33 @@
+[Unit]
+Description=Home Server Dashboard - Docker and Systemd service monitor
+Documentation=https://github.com/xerootg/home_server_dashboard
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nas-dashboard
+Restart=on-failure
+RestartSec=5
+
+# Configuration path
+Environment=CONFIG_PATH=/etc/nas_dashboard/services.json
+
+# Run as a dedicated user
+# NOTE: Change this to match the user configured in install.sh
+User=@@SERVICE_USER@@
+Group=docker
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadOnlyPaths=/
+ReadWritePaths=/var/log
+
+# Allow access to Docker socket
+SupplementaryGroups=docker
+
+[Install]
+WantedBy=multi-user.target
