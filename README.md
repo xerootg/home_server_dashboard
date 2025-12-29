@@ -2,13 +2,15 @@
 
 A lightweight Go web dashboard for monitoring Docker Compose services and systemd services across multiple hosts.
 
+![Dashboard Homepage with Search and Logs](docs/images/HomepageSearchLogs.png)
+
 ## Features
 
 - Monitor Docker containers from Compose projects
 - Monitor systemd units on local and remote hosts
 - Real-time log streaming via Server-Sent Events
 - Dark theme web interface with sorting and filtering
-- Bang & Pipe query language for advanced filtering
+- Bang & Pipe query language for advanced filtering - [readme on that](docs/bangandpipe-query-language.md)
 
 ## Requirements
 
