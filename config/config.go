@@ -80,8 +80,9 @@ func Get() *Config {
 }
 
 // Default returns a default configuration for when no config file exists.
+// It also stores the default as the global configuration.
 func Default() *Config {
-	return &Config{
+	cfg := &Config{
 		Hosts: []HostConfig{
 			{
 				Name:               "localhost",
@@ -91,4 +92,11 @@ func Default() *Config {
 			},
 		},
 	}
+
+	// Store as global config
+	configMutex.Lock()
+	globalConfig = cfg
+	configMutex.Unlock()
+
+	return cfg
 }

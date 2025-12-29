@@ -10,9 +10,15 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 
 ```
 home_server_dashboard/
-├── main.go                        # HTTP server, routes, and request handlers
-├── main_test.go                   # HTTP handler tests
+├── main.go                        # Application bootstrap (config loading, server start)
+├── main_test.go                   # Bootstrap integration tests
 ├── services.json                  # Configuration: hosts, systemd units to monitor
+├── handlers/
+│   ├── handlers.go                # HTTP request handlers (services, logs, index)
+│   └── handlers_test.go           # Handler unit tests
+├── server/
+│   ├── server.go                  # HTTP server setup, routing, configuration
+│   └── server_test.go             # Server configuration and routing tests
 ├── config/
 │   ├── config.go                  # Shared configuration loading and types
 │   └── config_test.go             # Config loading and helper tests
@@ -36,6 +42,29 @@ home_server_dashboard/
 ```
 
 ## Package Structure
+
+### `main` Package
+- **Purpose:** Application entry point and bootstrap
+- **Responsibilities:**
+  - Load configuration from `services.json`
+  - Create and start HTTP server
+- **Files:** `main.go`, `main_test.go`
+
+### `handlers` Package
+- **Purpose:** HTTP request handlers for all API endpoints
+- **Key Functions:**
+  - `ServicesHandler` — Returns JSON array of all services
+  - `DockerLogsHandler` — SSE stream for Docker container logs
+  - `SystemdLogsHandler` — SSE stream for systemd unit logs
+  - `IndexHandler` — Serves the main dashboard page
+- **Internal:** `getAllServices()` aggregates services from all providers
+
+### `server` Package
+- **Purpose:** HTTP server configuration and routing
+- **Key Types:**
+  - `Config` — Server configuration (port, static dir, config path)
+  - `Server` — HTTP server with routing setup
+- **Functions:** `New()`, `DefaultConfig()`, `ListenAndServe()`, `Handler()`
 
 ### `config` Package
 - **Purpose:** Shared configuration loading from `services.json`
@@ -91,9 +120,9 @@ Defines which hosts and services to monitor:
 }
 ```
 
-## Backend (main.go)
+## Backend
 
-**Server:** Standard library `net/http` on port 9001
+**Server:** Standard library `net/http` on port 9001, configured via `server` package
 
 **Endpoints:**
 - `GET /` — Serves `static/index.html`
@@ -101,6 +130,15 @@ Defines which hosts and services to monitor:
 - `GET /api/services` — Returns JSON array of all services (Docker + systemd)
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
+
+**Application Layers:**
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| Bootstrap | `main` | Config loading, server initialization |
+| Routing | `server` | HTTP routes, static files, server config |
+| Handlers | `handlers` | Request processing, response generation |
+| Services | `services/*` | Docker/systemd provider implementations |
+| Config | `config` | Configuration loading and access |
 
 **Service Types:**
 
@@ -193,10 +231,12 @@ go test ./...
 
 Unit tests mock system dependencies and can run on any machine:
 - **config/** — Config loading, parsing, helper methods
+- **handlers/** — HTTP handler validation, SSE headers, error responses
+- **server/** — Server configuration, routing setup
 - **services/** — ServiceInfo JSON serialization
 - **services/docker/** — Log reader header stripping, provider methods
 - **services/systemd/** — Provider creation, systemctl output parsing
-- **main.go** — HTTP handler validation, SSE headers, error responses
+- **main.go** — Bootstrap and package integration
 
 ### Integration Tests (require Docker/systemd)
 ```bash
@@ -209,8 +249,10 @@ Integration tests use the `//go:build integration` build tag and test real syste
 
 | Package | Unit Tests | Integration Tests |
 |---------|------------|-------------------|
+| main | ✅ | — |
+| handlers | ✅ | — |
+| server | ✅ | — |
 | config | ✅ | — |
 | services | ✅ | — |
 | services/docker | ✅ | ✅ |
 | services/systemd | ✅ | ✅ |
-| main | ✅ | — |
