@@ -12,6 +12,7 @@ import (
 
 	"home_server_dashboard/config"
 	"home_server_dashboard/services"
+	"home_server_dashboard/services/docker"
 )
 
 // setupTestConfig creates a temporary config file and loads it.
@@ -624,5 +625,225 @@ func TestServiceActionRequest_JSONParsing(t *testing.T) {
 	}
 	if req.Project != "myproject" {
 		t.Errorf("Project = %s, want myproject", req.Project)
+	}
+}
+
+// TestApplyPortRemaps tests the applyPortRemaps function.
+func TestApplyPortRemaps(t *testing.T) {
+	tests := []struct {
+		name           string
+		services       []services.ServiceInfo
+		remaps         []docker.PortRemap
+		expectTarget   string // service name to check for remapped port
+		expectPort     uint16 // port number expected on target
+		expectSource   string // expected SourceService value on remapped port
+		expectHidden   string // service name where port should be hidden
+	}{
+		{
+			name: "basic port remap",
+			services: []services.ServiceInfo{
+				{
+					Name:   "gluetun",
+					Source: "docker",
+					Ports: []services.PortInfo{
+						{HostPort: 8193, ContainerPort: 8193, Protocol: "tcp"},
+					},
+				},
+				{
+					Name:   "qbittorrent-books",
+					Source: "docker",
+					Ports:  []services.PortInfo{},
+				},
+			},
+			remaps: []docker.PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+			},
+			expectTarget: "qbittorrent-books",
+			expectPort:   8193,
+			expectSource: "gluetun",
+			expectHidden: "gluetun",
+		},
+		{
+			name: "no remaps - services unchanged",
+			services: []services.ServiceInfo{
+				{
+					Name:   "nginx",
+					Source: "docker",
+					Ports: []services.PortInfo{
+						{HostPort: 80, ContainerPort: 80, Protocol: "tcp"},
+					},
+				},
+			},
+			remaps:       []docker.PortRemap{},
+			expectTarget: "",
+			expectPort:   0,
+			expectSource: "",
+			expectHidden: "",
+		},
+		{
+			name: "remap to non-existent target - no change",
+			services: []services.ServiceInfo{
+				{
+					Name:   "gluetun",
+					Source: "docker",
+					Ports: []services.PortInfo{
+						{HostPort: 8193, ContainerPort: 8193, Protocol: "tcp"},
+					},
+				},
+			},
+			remaps: []docker.PortRemap{
+				{Port: 8193, TargetService: "nonexistent", SourceService: "gluetun"},
+			},
+			expectTarget: "",
+			expectPort:   0,
+			expectSource: "",
+			expectHidden: "",
+		},
+		{
+			name: "remap non-existent port - no change",
+			services: []services.ServiceInfo{
+				{
+					Name:   "gluetun",
+					Source: "docker",
+					Ports: []services.PortInfo{
+						{HostPort: 8080, ContainerPort: 8080, Protocol: "tcp"},
+					},
+				},
+				{
+					Name:   "qbittorrent-books",
+					Source: "docker",
+					Ports:  []services.PortInfo{},
+				},
+			},
+			remaps: []docker.PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+			},
+			expectTarget: "",
+			expectPort:   0,
+			expectSource: "",
+			expectHidden: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := applyPortRemaps(tt.services, tt.remaps)
+
+			if tt.expectTarget == "" {
+				// No remap expected, verify no changes
+				return
+			}
+
+			// Find target service and verify port was added
+			var targetSvc *services.ServiceInfo
+			var sourceSvc *services.ServiceInfo
+			for i := range result {
+				if result[i].Name == tt.expectTarget {
+					targetSvc = &result[i]
+				}
+				if result[i].Name == tt.expectHidden {
+					sourceSvc = &result[i]
+				}
+			}
+
+			if targetSvc == nil {
+				t.Fatalf("Target service %q not found", tt.expectTarget)
+			}
+
+			// Check that the port was added to target
+			var foundPort *services.PortInfo
+			for i := range targetSvc.Ports {
+				if targetSvc.Ports[i].HostPort == tt.expectPort {
+					foundPort = &targetSvc.Ports[i]
+					break
+				}
+			}
+
+			if foundPort == nil {
+				t.Errorf("Port %d not found on target service %s", tt.expectPort, tt.expectTarget)
+			} else {
+				if foundPort.SourceService != tt.expectSource {
+					t.Errorf("Port SourceService = %q, want %q", foundPort.SourceService, tt.expectSource)
+				}
+			}
+
+			// Check that the port was hidden on source
+			if sourceSvc != nil && tt.expectHidden != "" {
+				for _, port := range sourceSvc.Ports {
+					if port.HostPort == tt.expectPort && !port.Hidden {
+						t.Errorf("Port %d on source service %s should be hidden", tt.expectPort, tt.expectHidden)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestApplyPortRemaps_MultipleRemaps tests multiple port remaps from the same source.
+func TestApplyPortRemaps_MultipleRemaps(t *testing.T) {
+	svcList := []services.ServiceInfo{
+		{
+			Name:   "gluetun",
+			Source: "docker",
+			Ports: []services.PortInfo{
+				{HostPort: 8193, ContainerPort: 8193, Protocol: "tcp"},
+				{HostPort: 8194, ContainerPort: 8194, Protocol: "tcp"},
+				{HostPort: 9117, ContainerPort: 9117, Protocol: "tcp"},
+			},
+		},
+		{
+			Name:   "qbittorrent-books",
+			Source: "docker",
+			Ports:  []services.PortInfo{},
+		},
+		{
+			Name:   "qbittorrent-movies",
+			Source: "docker",
+			Ports:  []services.PortInfo{},
+		},
+		{
+			Name:   "jackett",
+			Source: "docker",
+			Ports:  []services.PortInfo{},
+		},
+	}
+
+	remaps := []docker.PortRemap{
+		{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+		{Port: 8194, TargetService: "qbittorrent-movies", SourceService: "gluetun"},
+		{Port: 9117, TargetService: "jackett", SourceService: "gluetun"},
+	}
+
+	result := applyPortRemaps(svcList, remaps)
+
+	// Build a map for easier checking
+	svcMap := make(map[string]*services.ServiceInfo)
+	for i := range result {
+		svcMap[result[i].Name] = &result[i]
+	}
+
+	// Check qbittorrent-books got port 8193
+	if len(svcMap["qbittorrent-books"].Ports) != 1 || svcMap["qbittorrent-books"].Ports[0].HostPort != 8193 {
+		t.Errorf("qbittorrent-books should have port 8193")
+	}
+	if svcMap["qbittorrent-books"].Ports[0].SourceService != "gluetun" {
+		t.Errorf("qbittorrent-books port should have SourceService=gluetun")
+	}
+
+	// Check qbittorrent-movies got port 8194
+	if len(svcMap["qbittorrent-movies"].Ports) != 1 || svcMap["qbittorrent-movies"].Ports[0].HostPort != 8194 {
+		t.Errorf("qbittorrent-movies should have port 8194")
+	}
+
+	// Check jackett got port 9117
+	if len(svcMap["jackett"].Ports) != 1 || svcMap["jackett"].Ports[0].HostPort != 9117 {
+		t.Errorf("jackett should have port 9117")
+	}
+
+	// Check all ports on gluetun are now hidden
+	for _, port := range svcMap["gluetun"].Ports {
+		if !port.Hidden {
+			t.Errorf("gluetun port %d should be hidden", port.HostPort)
+		}
 	}
 }

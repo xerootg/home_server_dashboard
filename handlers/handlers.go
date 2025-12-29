@@ -30,6 +30,7 @@ import (
 // getAllServices collects services from all configured providers.
 func getAllServices(ctx context.Context, cfg *config.Config) ([]services.ServiceInfo, error) {
 	var allServices []services.ServiceInfo
+	var allPortRemaps []docker.PortRemap
 
 	// Build a map of host names to their private IPs for quick lookup
 	hostIPMap := make(map[string]string)
@@ -44,16 +45,13 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		log.Printf("Warning: failed to create Docker provider: %v", err)
 	} else {
 		defer dockerProvider.Close()
-		dockerServices, err := dockerProvider.GetServices(ctx)
-		if err != nil {
-			log.Printf("Warning: failed to get Docker services: %v", err)
-		} else {
-			// Set HostIP for each Docker service
-			for i := range dockerServices {
-				dockerServices[i].HostIP = hostIPMap[dockerServices[i].Host]
-			}
-			allServices = append(allServices, dockerServices...)
+		dockerServices, portRemaps := dockerProvider.GetServicesWithRemaps(ctx)
+		// Set HostIP for each Docker service
+		for i := range dockerServices {
+			dockerServices[i].HostIP = hostIPMap[dockerServices[i].Host]
 		}
+		allServices = append(allServices, dockerServices...)
+		allPortRemaps = append(allPortRemaps, portRemaps...)
 	}
 
 	// Get systemd services from each configured host
@@ -75,10 +73,74 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		allServices = append(allServices, systemdServices...)
 	}
 
+	// Apply port remapping (move ports from source services to target services)
+	allServices = applyPortRemaps(allServices, allPortRemaps)
+
 	// Enrich services with Traefik hostnames
 	allServices = enrichWithTraefikURLs(ctx, cfg, allServices)
 
 	return allServices, nil
+}
+
+// applyPortRemaps moves ports from source services to target services based on remap labels.
+// This is used when services run in another container's network namespace (e.g., qbittorrent in gluetun).
+// The remapped ports will have SourceService set to indicate which service exposes the port.
+func applyPortRemaps(svcList []services.ServiceInfo, remaps []docker.PortRemap) []services.ServiceInfo {
+	if len(remaps) == 0 {
+		return svcList
+	}
+
+	// Build a map of service name to index for quick lookup
+	svcIndex := make(map[string]int)
+	for i, svc := range svcList {
+		svcIndex[svc.Name] = i
+	}
+
+	// Process each remap
+	for _, remap := range remaps {
+		sourceIdx, sourceExists := svcIndex[remap.SourceService]
+		targetIdx, targetExists := svcIndex[remap.TargetService]
+
+		if !sourceExists || !targetExists {
+			log.Printf("Warning: port remap failed - source=%s (exists=%v) target=%s (exists=%v)",
+				remap.SourceService, sourceExists, remap.TargetService, targetExists)
+			continue
+		}
+
+		// Find the port in the source service
+		sourceSvc := &svcList[sourceIdx]
+		targetSvc := &svcList[targetIdx]
+
+		var portToMove *services.PortInfo
+		var portIdx int = -1
+		for i, port := range sourceSvc.Ports {
+			if port.HostPort == remap.Port {
+				portToMove = &sourceSvc.Ports[i]
+				portIdx = i
+				break
+			}
+		}
+
+		if portToMove == nil {
+			log.Printf("Warning: port remap failed - port %d not found on service %s",
+				remap.Port, remap.SourceService)
+			continue
+		}
+
+		// Create a copy of the port with SourceService set
+		remappedPort := *portToMove
+		remappedPort.SourceService = remap.SourceService
+
+		// Add to target service
+		targetSvc.Ports = append(targetSvc.Ports, remappedPort)
+
+		// Remove from source service (mark as hidden instead to preserve order)
+		sourceSvc.Ports[portIdx].Hidden = true
+
+		log.Printf("Port %d remapped from %s to %s", remap.Port, remap.SourceService, remap.TargetService)
+	}
+
+	return svcList
 }
 
 // enrichWithTraefikURLs adds Traefik-exposed URLs to services.

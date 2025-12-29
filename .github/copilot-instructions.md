@@ -210,11 +210,12 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 **ServiceInfo struct (in `services/service.go`):**
 ```go
 type PortInfo struct {
-    HostPort      uint16 `json:"host_port"`       // Port exposed on the host
-    ContainerPort uint16 `json:"container_port"`  // Port on the container
-    Protocol      string `json:"protocol"`        // "tcp" or "udp"
-    Label         string `json:"label,omitempty"` // Custom label for display (from Docker label)
-    Hidden        bool   `json:"hidden,omitempty"` // If true, port should be hidden from UI
+    HostPort      uint16 `json:"host_port"`                 // Port exposed on the host
+    ContainerPort uint16 `json:"container_port"`            // Port on the container
+    Protocol      string `json:"protocol"`                  // "tcp" or "udp"
+    Label         string `json:"label,omitempty"`           // Custom label for display (from Docker label)
+    Hidden        bool   `json:"hidden,omitempty"`          // If true, port should be hidden from UI
+    SourceService string `json:"source_service,omitempty"`  // Service that exposes this port (for remapped ports)
 }
 
 type ServiceInfo struct {
@@ -264,6 +265,7 @@ The dashboard reads the following labels from Docker containers to customize vis
 | `home.server.dashboard.ports.hidden` | `port1,port2,...` | Comma-separated list of port numbers to hide |
 | `home.server.dashboard.ports.<port>.label` | Any string | Custom label for a specific port (e.g., `home.server.dashboard.ports.8080.label=Admin`) |
 | `home.server.dashboard.ports.<port>.hidden` | `true`, `1`, `yes` | Hide a specific port from display |
+| `home.server.dashboard.remapport.<port>` | Service name | Remap a port to another service (for containers sharing network namespace) |
 
 Example docker-compose.yml:
 ```yaml
@@ -276,6 +278,20 @@ services:
       home.server.dashboard.ports.9000.hidden: "true"
       # Or hide multiple ports at once:
       # home.server.dashboard.ports.hidden: "9000,9001"
+
+  # Example: VPN container exposing ports for services running in its network
+  gluetun:
+    image: qmcgaw/gluetun
+    ports:
+      - "8193:8193"  # qbittorrent-books web UI
+    labels:
+      # Remap port 8193 to appear on qbittorrent-books service
+      home.server.dashboard.remapport.8193: qbittorrent-books
+  
+  qbittorrent-books:
+    image: lscr.io/linuxserver/qbittorrent
+    network_mode: "service:gluetun"  # Uses gluetun's network
+    # Port 8193 will appear here with "gluetun:8193" label
 ```
 
 **Systemd Integration (`services/systemd/systemd.go`):**

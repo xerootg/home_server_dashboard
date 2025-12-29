@@ -60,10 +60,24 @@ function renderPorts(ports, hostIP) {
         .map(port => {
             const url = `http://${targetHost}:${port.host_port}`;
             // Use custom label if provided, otherwise show port number
-            const displayText = port.label ? escapeHtml(port.label) : `:${port.host_port}`;
-            const titleText = port.label 
-                ? `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`
-                : `Open port ${port.host_port} (${port.protocol})`;
+            // If the port is remapped from another service, show the source service name
+            let displayText;
+            if (port.label) {
+                displayText = escapeHtml(port.label);
+            } else if (port.source_service) {
+                displayText = `${escapeHtml(port.source_service)}:${port.host_port}`;
+            } else {
+                displayText = `:${port.host_port}`;
+            }
+            
+            let titleText;
+            if (port.label) {
+                titleText = `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`;
+            } else if (port.source_service) {
+                titleText = `Port ${port.host_port} from ${escapeHtml(port.source_service)} (${port.protocol})`;
+            } else {
+                titleText = `Open port ${port.host_port} (${port.protocol})`;
+            }
             return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="port-link badge bg-info text-dark me-1" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
         }).join('');
 }

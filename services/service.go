@@ -8,11 +8,12 @@ import (
 
 // PortInfo represents an exposed port on a service.
 type PortInfo struct {
-	HostPort      uint16 `json:"host_port"`      // Port exposed on the host
-	ContainerPort uint16 `json:"container_port"` // Port on the container
-	Protocol      string `json:"protocol"`       // "tcp" or "udp"
-	Label         string `json:"label,omitempty"` // Custom label for display (from Docker label)
-	Hidden        bool   `json:"hidden,omitempty"` // If true, port should be hidden from UI
+	HostPort      uint16 `json:"host_port"`                 // Port exposed on the host
+	ContainerPort uint16 `json:"container_port"`            // Port on the container
+	Protocol      string `json:"protocol"`                  // "tcp" or "udp"
+	Label         string `json:"label,omitempty"`           // Custom label for display (from Docker label)
+	Hidden        bool   `json:"hidden,omitempty"`          // If true, port should be hidden from UI
+	SourceService string `json:"source_service,omitempty"`  // Service that exposes this port (for remapped ports)
 }
 
 // ServiceInfo represents the status information for any service.

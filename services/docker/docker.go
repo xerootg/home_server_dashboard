@@ -27,6 +27,8 @@ const (
 	LabelPortsPrefix = LabelPrefix + ".ports"
 	// LabelPortsHidden is the label for a comma-separated list of hidden port numbers
 	LabelPortsHidden = LabelPortsPrefix + ".hidden"
+	// LabelRemapPortPrefix is the prefix for port remapping labels (home.server.dashboard.remapport.<port>=<service>)
+	LabelRemapPortPrefix = LabelPrefix + ".remapport"
 )
 
 // Provider implements services.Provider for Docker containers.
@@ -63,12 +65,20 @@ func (p *Provider) Name() string {
 
 // GetServices returns all Docker Compose containers as services.
 func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, error) {
+	svcList, _ := p.GetServicesWithRemaps(ctx)
+	return svcList, nil
+}
+
+// GetServicesWithRemaps returns all Docker Compose containers as services,
+// along with any port remapping information from container labels.
+func (p *Provider) GetServicesWithRemaps(ctx context.Context) ([]services.ServiceInfo, []PortRemap) {
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
+		return nil, nil
 	}
 
 	var result []services.ServiceInfo
+	var allRemaps []PortRemap
 	for _, ctr := range containers {
 		// Docker Compose labels
 		project := ctr.Labels["com.docker.compose.project"]
@@ -91,6 +101,10 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 		// Extract non-localhost exposed ports with label customizations
 		ports := extractExposedPorts(ctr.Ports, ctr.Labels)
 
+		// Extract port remapping information
+		remaps := parsePortRemaps(ctr.Labels, service)
+		allRemaps = append(allRemaps, remaps...)
+
 		// Extract custom description from label
 		description := ctr.Labels[LabelDescription]
 
@@ -112,7 +126,7 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 		})
 	}
 
-	return result, nil
+	return result, allRemaps
 }
 
 // extractExposedPorts filters ports to only include those bound to non-localhost addresses.
@@ -192,6 +206,44 @@ func getPortLabel(labels map[string]string, port uint16) string {
 func isPortHiddenByLabel(labels map[string]string, port uint16) bool {
 	key := fmt.Sprintf("%s.%d.hidden", LabelPortsPrefix, port)
 	return isLabelTrue(labels[key])
+}
+
+// PortRemap represents a port that should be remapped from one service to another.
+// This is used when a service runs in another container's network namespace
+// (e.g., qbittorrent running in gluetun's network).
+type PortRemap struct {
+	Port          uint16 // The host port to remap
+	TargetService string // The service name that should own this port
+	SourceService string // The service name that exposes this port
+}
+
+// parsePortRemaps extracts port remapping information from container labels.
+// Looks for labels like: home.server.dashboard.remapport.<port>=<target_service>
+// Returns a list of port remaps for this container.
+func parsePortRemaps(labels map[string]string, sourceService string) []PortRemap {
+	var remaps []PortRemap
+	prefix := LabelRemapPortPrefix + "."
+	for key, value := range labels {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		// Extract port number from key
+		portStr := strings.TrimPrefix(key, prefix)
+		port, err := strconv.ParseUint(portStr, 10, 16)
+		if err != nil {
+			continue
+		}
+		targetService := strings.TrimSpace(value)
+		if targetService == "" {
+			continue
+		}
+		remaps = append(remaps, PortRemap{
+			Port:          uint16(port),
+			TargetService: targetService,
+			SourceService: sourceService,
+		})
+	}
+	return remaps
 }
 
 // GetService returns a specific Docker service by container name.

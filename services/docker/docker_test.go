@@ -700,4 +700,130 @@ func TestLabelConstants(t *testing.T) {
 	if LabelPortsHidden != "home.server.dashboard.ports.hidden" {
 		t.Errorf("LabelPortsHidden = %q, want %q", LabelPortsHidden, "home.server.dashboard.ports.hidden")
 	}
+	if LabelRemapPortPrefix != "home.server.dashboard.remapport" {
+		t.Errorf("LabelRemapPortPrefix = %q, want %q", LabelRemapPortPrefix, "home.server.dashboard.remapport")
+	}
+}
+
+// TestParsePortRemaps tests the parsePortRemaps function.
+func TestParsePortRemaps(t *testing.T) {
+	tests := []struct {
+		name          string
+		labels        map[string]string
+		sourceService string
+		expected      []PortRemap
+	}{
+		{
+			name:          "no remap labels",
+			labels:        map[string]string{},
+			sourceService: "gluetun",
+			expected:      nil,
+		},
+		{
+			name: "single port remap",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.8193": "qbittorrent-books",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+			},
+		},
+		{
+			name: "multiple port remaps",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.8193": "qbittorrent-books",
+				"home.server.dashboard.remapport.8194": "qbittorrent-movies",
+				"home.server.dashboard.remapport.9117": "jackett",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+				{Port: 8194, TargetService: "qbittorrent-movies", SourceService: "gluetun"},
+				{Port: 9117, TargetService: "jackett", SourceService: "gluetun"},
+			},
+		},
+		{
+			name: "ignore non-remap labels",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.8193": "qbittorrent-books",
+				"home.server.dashboard.description":    "VPN container",
+				"home.server.dashboard.ports.8080.label": "Web UI",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+			},
+		},
+		{
+			name: "ignore invalid port numbers",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.abc":    "service1",
+				"home.server.dashboard.remapport.99999":  "service2",
+				"home.server.dashboard.remapport.-1":     "service3",
+				"home.server.dashboard.remapport.8193":   "valid-service",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8193, TargetService: "valid-service", SourceService: "gluetun"},
+			},
+		},
+		{
+			name: "ignore empty target service",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.8193": "",
+				"home.server.dashboard.remapport.8194": "   ",
+				"home.server.dashboard.remapport.8195": "valid-service",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8195, TargetService: "valid-service", SourceService: "gluetun"},
+			},
+		},
+		{
+			name: "trim whitespace from target service",
+			labels: map[string]string{
+				"home.server.dashboard.remapport.8193": "  qbittorrent-books  ",
+			},
+			sourceService: "gluetun",
+			expected: []PortRemap{
+				{Port: 8193, TargetService: "qbittorrent-books", SourceService: "gluetun"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parsePortRemaps(tt.labels, tt.sourceService)
+
+			if len(tt.expected) == 0 && len(result) == 0 {
+				return // Both are empty, test passes
+			}
+
+			// Check that all expected remaps are present (order may vary due to map iteration)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("parsePortRemaps() returned %d remaps, want %d", len(result), len(tt.expected))
+			}
+
+			// Create a map for easier lookup
+			resultMap := make(map[uint16]PortRemap)
+			for _, r := range result {
+				resultMap[r.Port] = r
+			}
+
+			for _, exp := range tt.expected {
+				got, ok := resultMap[exp.Port]
+				if !ok {
+					t.Errorf("expected remap for port %d not found", exp.Port)
+					continue
+				}
+				if got.TargetService != exp.TargetService {
+					t.Errorf("port %d: TargetService = %q, want %q", exp.Port, got.TargetService, exp.TargetService)
+				}
+				if got.SourceService != exp.SourceService {
+					t.Errorf("port %d: SourceService = %q, want %q", exp.Port, got.SourceService, exp.SourceService)
+				}
+			}
+		})
+	}
 }
