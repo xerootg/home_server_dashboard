@@ -13,11 +13,16 @@
 | Logs should have a text search for each log window that is open | ✅ Done |
 | service type (systemd/docker) should be filterable | ✅ Done |
 | BangAndPipe search should apply to services rendered in the table of services | ✅ Done |
-| If the service exposes ports, not to localhost, but to any IP, I want a list of those after the service name, which on click opens that port as HTTP | ⬜ |
+| If the service exposes ports, not to localhost, but to any IP, I want a list of those after the service name, which on click opens that port as HTTP | ✅ Done |
+| determine if a service is exposed in traefik. if it is, add another link to the hostname at which the service is bound | |
+| allow filtering and labeling of ports in the UI via docker labels. systemd does not expose ports, maybe later. |  |
 | Write a systemd unit for this service and start it when the server starts. include a script to compile and install this binary, as well as uninstall. the config path should be configurable, and /etc/nas_dashboard/services.json should be the default path, with sample.services.json copied into that folder | ⬜ |
 | all services rendered should have a start/stop/restart button. on docker, restart should down/up and not simply do a restart | ⬜ |
 | a pipeline (github actions) that runs on every push which runs the tests, including integration (docker, systemd) | ⬜ |
 | critical services, as defined in services.json, should be monitored for crashing. in the case of docker, if docker is not handling it via healthcheck/restart:always(or whatever), then bounce that service. systemd services should be started if stopped and there is no defined retry policy. all logs from this should be logged in stdout as well as /var/log/home_server_dashboard.log | ⬜ |
-| container name should be filterable | |
 | email should be sent to contacts as defined in services.json | |
-| port should be defined, as well as ip, from services.json ||
+| port should be defined, optionally as well as ip, from services.json | |
+| implement pub/sub for updates instead of depending on browser polling, use https://github.com/gorilla/websocket to publish updates. setup a system to monitor for state changes in go, and refactor the frontend to dynamically handle these events. | |
+| Add security, using OIDC. Any user which has the admin claim can use this app. all endpoints will need to accept a token, which will need to be plumbed through to some central server-side context to verify the user is logged in |  |
+| Add a security fallback, using PAM as the auth verification, as a failover when oauth is offline. issue a JWT which is valid for the PAM result. Members of the docker group have access. |  |
+| run fail2ban or something infront of auth to block requests from abusive IPs |   |

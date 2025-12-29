@@ -77,9 +77,9 @@ home_server_dashboard/
 ### `config` Package
 - **Purpose:** Shared configuration loading from `services.json`
 - **Key Types:**
-  - `HostConfig` — Single host configuration with helper methods like `IsLocal()`
+  - `HostConfig` — Single host configuration with helper methods like `IsLocal()`, `GetPrivateIP()`
   - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`
-- **Functions:** `Load()`, `Get()`, `Default()`
+- **Functions:** `Load()`, `Get()`, `Default()`, `isPrivateIP()`
 
 ### `query` Package
 - **Purpose:** Compiles "Bang & Pipe" search expressions into ASTs for client-side evaluation
@@ -113,6 +113,7 @@ home_server_dashboard/
   - Connects via Docker socket
   - Filters by Docker Compose labels
   - Streams logs with 8-byte header demultiplexing
+  - Extracts exposed ports bound to non-localhost addresses (0.0.0.0 or specific IPs)
 
 ### `services/systemd` Package
 - **Purpose:** Systemd unit management via D-Bus (local) or SSH (remote)
@@ -126,7 +127,7 @@ home_server_dashboard/
 
 ## Configuration (services.json)
 
-Defines which hosts and services to monitor:
+Defines which hosts and services to monitor. Supports JSON with comments (`//`, `/* */`) and trailing commas via [hujson](https://github.com/tailscale/hujson). **The service will fail to start if the config file cannot be parsed.**
 
 ```json
 {
@@ -134,6 +135,7 @@ Defines which hosts and services to monitor:
     {
       "name": "nas",                    // Display name
       "address": "localhost",           // "localhost" uses D-Bus, others use SSH
+      "nic": ["ens10"],                 // NIC names to resolve private IP for port links
       "systemd_services": ["docker.service"],
       "docker_compose_roots": ["/home/xero/nas/"]
     },
@@ -177,15 +179,23 @@ Defines which hosts and services to monitor:
 
 **ServiceInfo struct (in `services/service.go`):**
 ```go
+type PortInfo struct {
+    HostPort      uint16 `json:"host_port"`      // Port exposed on the host
+    ContainerPort uint16 `json:"container_port"` // Port on the container
+    Protocol      string `json:"protocol"`       // "tcp" or "udp"
+}
+
 type ServiceInfo struct {
-    Name          string `json:"name"`           // Service/unit name
-    Project       string `json:"project"`        // Docker project or "systemd"
-    ContainerName string `json:"container_name"` // Container name or unit name
-    State         string `json:"state"`          // "running" or "stopped"
-    Status        string `json:"status"`         // Human-readable status
-    Image         string `json:"image"`          // Docker image or "-"
-    Source        string `json:"source"`         // "docker" or "systemd"
-    Host          string `json:"host"`           // Host name from config
+    Name          string     `json:"name"`           // Service/unit name
+    Project       string     `json:"project"`        // Docker project or "systemd"
+    ContainerName string     `json:"container_name"` // Container name or unit name
+    State         string     `json:"state"`          // "running" or "stopped"
+    Status        string     `json:"status"`         // Human-readable status
+    Image         string     `json:"image"`          // Docker image or "-"
+    Source        string     `json:"source"`         // "docker" or "systemd"
+    Host          string     `json:"host"`           // Host name from config
+    HostIP        string     `json:"host_ip"`        // Private IP address for port links
+    Ports         []PortInfo `json:"ports"`          // Exposed ports (non-localhost bindings)
 }
 ```
 
@@ -230,6 +240,7 @@ type Service interface {
 - Sortable columns (click header to sort, click again to reverse)
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
+- **Port links**: Clickable badges after service name showing exposed ports (non-localhost only), opens HTTP URL on click
 - **Table search**: VS Code-style search widget below filter cards
   - Filters across all columns (name, project, host, container, status, image, source)
   - Supports plain text, regex (with `!` prefix for inverse), and Bang & Pipe mode

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -185,6 +186,86 @@ func TestLoad(t *testing.T) {
 			t.Error("Load() should return error for invalid JSON")
 		}
 	})
+
+	t.Run("JSON with line comments", func(t *testing.T) {
+		commentPath := filepath.Join(tempDir, "comments.json")
+		jsonWithComments := `{
+			// This is a comment
+			"hosts": [
+				{
+					"name": "testhost", // inline comment
+					"address": "localhost",
+					"systemd_services": ["docker.service"],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+		err := os.WriteFile(commentPath, []byte(jsonWithComments), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write config with comments: %v", err)
+		}
+
+		cfg, err := Load(commentPath)
+		if err != nil {
+			t.Fatalf("Load() should handle line comments, got error = %v", err)
+		}
+		if len(cfg.Hosts) != 1 || cfg.Hosts[0].Name != "testhost" {
+			t.Errorf("Config not parsed correctly with comments")
+		}
+	})
+
+	t.Run("JSON with block comments", func(t *testing.T) {
+		blockCommentPath := filepath.Join(tempDir, "block_comments.json")
+		jsonWithBlockComments := `{
+			/* This is a block comment */
+			"hosts": [
+				{
+					"name": "blocktest",
+					"address": "localhost",
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+		err := os.WriteFile(blockCommentPath, []byte(jsonWithBlockComments), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write config with block comments: %v", err)
+		}
+
+		cfg, err := Load(blockCommentPath)
+		if err != nil {
+			t.Fatalf("Load() should handle block comments, got error = %v", err)
+		}
+		if len(cfg.Hosts) != 1 || cfg.Hosts[0].Name != "blocktest" {
+			t.Errorf("Config not parsed correctly with block comments")
+		}
+	})
+
+	t.Run("JSON with trailing commas", func(t *testing.T) {
+		trailingPath := filepath.Join(tempDir, "trailing.json")
+		jsonWithTrailing := `{
+			"hosts": [
+				{
+					"name": "trailingtest",
+					"address": "localhost",
+					"systemd_services": ["docker.service",],
+					"docker_compose_roots": [],
+				},
+			],
+		}`
+		err := os.WriteFile(trailingPath, []byte(jsonWithTrailing), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write config with trailing commas: %v", err)
+		}
+
+		cfg, err := Load(trailingPath)
+		if err != nil {
+			t.Fatalf("Load() should handle trailing commas, got error = %v", err)
+		}
+		if len(cfg.Hosts) != 1 || cfg.Hosts[0].Name != "trailingtest" {
+			t.Errorf("Config not parsed correctly with trailing commas")
+		}
+	})
 }
 
 func TestGet(t *testing.T) {
@@ -241,5 +322,94 @@ func TestDefault(t *testing.T) {
 	}
 	if !host.IsLocal() {
 		t.Error("Default host should be local")
+	}
+}
+
+func TestIsPrivateIP(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"10.0.0.0/8 start", "10.0.0.1", true},
+		{"10.0.0.0/8 end", "10.255.255.254", true},
+		{"172.16.0.0/12 start", "172.16.0.1", true},
+		{"172.16.0.0/12 end", "172.31.255.254", true},
+		{"172.15.x.x not private", "172.15.0.1", false},
+		{"172.32.x.x not private", "172.32.0.1", false},
+		{"192.168.0.0/16 start", "192.168.0.1", true},
+		{"192.168.0.0/16 end", "192.168.255.254", true},
+		{"public IP", "8.8.8.8", false},
+		{"localhost", "127.0.0.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			got := isPrivateIP(ip)
+			if got != tt.expected {
+				t.Errorf("isPrivateIP(%q) = %v, want %v", tt.ip, got, tt.expected)
+			}
+		})
+	}
+
+	// Test nil IP
+	t.Run("nil IP", func(t *testing.T) {
+		if isPrivateIP(nil) {
+			t.Error("isPrivateIP(nil) should return false")
+		}
+	})
+}
+
+func TestHostConfig_GetPrivateIP(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected string
+	}{
+		{
+			name:     "address is already private IP",
+			host:     HostConfig{Address: "192.168.1.100"},
+			expected: "192.168.1.100",
+		},
+		{
+			name:     "address is 10.x.x.x private IP",
+			host:     HostConfig{Address: "10.0.0.5"},
+			expected: "10.0.0.5",
+		},
+		{
+			name:     "address is 172.16.x.x private IP",
+			host:     HostConfig{Address: "172.16.0.10"},
+			expected: "172.16.0.10",
+		},
+		{
+			name:     "address is public IP returns empty",
+			host:     HostConfig{Address: "8.8.8.8"},
+			expected: "",
+		},
+		{
+			name:     "localhost without NIC returns empty",
+			host:     HostConfig{Address: "localhost"},
+			expected: "",
+		},
+		{
+			name:     "localhost with nonexistent NIC returns empty",
+			host:     HostConfig{Address: "localhost", NIC: []string{"nonexistent-nic-12345"}},
+			expected: "",
+		},
+		{
+			name:     "hostname without NIC returns empty",
+			host:     HostConfig{Address: "server.example.com"},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.host.GetPrivateIP()
+			if got != tt.expected {
+				t.Errorf("GetPrivateIP() = %v, want %v", got, tt.expected)
+			}
+		})
 	}
 }

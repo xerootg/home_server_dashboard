@@ -27,6 +27,12 @@ import (
 func getAllServices(ctx context.Context, cfg *config.Config) ([]services.ServiceInfo, error) {
 	var allServices []services.ServiceInfo
 
+	// Build a map of host names to their private IPs for quick lookup
+	hostIPMap := make(map[string]string)
+	for _, host := range cfg.Hosts {
+		hostIPMap[host.Name] = host.GetPrivateIP()
+	}
+
 	// Get Docker services from localhost
 	localHostName := cfg.GetLocalHostName()
 	dockerProvider, err := docker.NewProvider(localHostName)
@@ -38,6 +44,10 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		if err != nil {
 			log.Printf("Warning: failed to get Docker services: %v", err)
 		} else {
+			// Set HostIP for each Docker service
+			for i := range dockerServices {
+				dockerServices[i].HostIP = hostIPMap[dockerServices[i].Host]
+			}
 			allServices = append(allServices, dockerServices...)
 		}
 	}
@@ -53,6 +63,10 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		if err != nil {
 			log.Printf("Warning: failed to get systemd services from %s: %v", host.Name, err)
 			continue
+		}
+		// Set HostIP for each systemd service
+		for i := range systemdServices {
+			systemdServices[i].HostIP = hostIPMap[systemdServices[i].Host]
 		}
 		allServices = append(allServices, systemdServices...)
 	}

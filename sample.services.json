@@ -3,6 +3,9 @@
         {
             "name": "nas",
             "address": "localhost",
+            "nic": [
+                "ens10"
+            ],
             "systemd_services": [
                 "docker.service"
             ],

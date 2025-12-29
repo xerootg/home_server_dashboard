@@ -6,7 +6,163 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	"github.com/docker/docker/api/types/container"
+
+	"home_server_dashboard/services"
 )
+
+// TestExtractExposedPorts tests the extractExposedPorts function.
+func TestExtractExposedPorts(t *testing.T) {
+	tests := []struct {
+		name     string
+		ports    []container.Port
+		expected []services.PortInfo
+	}{
+		{
+			name:     "empty ports",
+			ports:    []container.Port{},
+			expected: nil,
+		},
+		{
+			name: "skip localhost-only bindings",
+			ports: []container.Port{
+				{IP: "127.0.0.1", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			expected: nil,
+		},
+		{
+			name: "include 0.0.0.0 bindings",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+			},
+		},
+		{
+			name: "include empty IP bindings (all interfaces)",
+			ports: []container.Port{
+				{IP: "", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
+			},
+		},
+		{
+			name: "skip ports without public port",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 0, Type: "tcp"},
+			},
+			expected: nil,
+		},
+		{
+			name: "mixed bindings",
+			ports: []container.Port{
+				{IP: "127.0.0.1", PrivatePort: 3000, PublicPort: 3000, Type: "tcp"}, // skip
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},     // include
+				{IP: "", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},           // include
+				{IP: "0.0.0.0", PrivatePort: 53, PublicPort: 5353, Type: "udp"},     // include
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
+				{HostPort: 5353, ContainerPort: 53, Protocol: "udp"},
+			},
+		},
+		{
+			name: "include specific non-localhost IP",
+			ports: []container.Port{
+				{IP: "192.168.1.100", PrivatePort: 80, PublicPort: 80, Type: "tcp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 80, ContainerPort: 80, Protocol: "tcp"},
+			},
+		},
+		{
+			name: "deduplicate same port on IPv4 and IPv6",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "::", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+			},
+		},
+		{
+			name: "deduplicate same port multiple bindings",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "192.168.1.100", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+			},
+		},
+		{
+			name: "different protocols not deduplicated",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 53, PublicPort: 53, Type: "tcp"},
+				{IP: "0.0.0.0", PrivatePort: 53, PublicPort: 53, Type: "udp"},
+			},
+			expected: []services.PortInfo{
+				{HostPort: 53, ContainerPort: 53, Protocol: "tcp"},
+				{HostPort: 53, ContainerPort: 53, Protocol: "udp"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractExposedPorts(tt.ports)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("extractExposedPorts() returned %d ports, want %d", len(result), len(tt.expected))
+			}
+
+			for i, port := range result {
+				if port.HostPort != tt.expected[i].HostPort {
+					t.Errorf("port[%d].HostPort = %v, want %v", i, port.HostPort, tt.expected[i].HostPort)
+				}
+				if port.ContainerPort != tt.expected[i].ContainerPort {
+					t.Errorf("port[%d].ContainerPort = %v, want %v", i, port.ContainerPort, tt.expected[i].ContainerPort)
+				}
+				if port.Protocol != tt.expected[i].Protocol {
+					t.Errorf("port[%d].Protocol = %v, want %v", i, port.Protocol, tt.expected[i].Protocol)
+				}
+			}
+		})
+	}
+}
+
+// TestParsePort tests the parsePort helper function.
+func TestParsePort(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected uint16
+	}{
+		{"80", 80},
+		{"8080", 8080},
+		{"443", 443},
+		{"65535", 65535},
+		{"0", 0},
+		{"", 0},
+		{"invalid", 0},
+		{"-1", 0},
+		{"65536", 0},
+		{"123abc", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parsePort(tt.input)
+			if result != tt.expected {
+				t.Errorf("parsePort(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
 
 // TestDockerService_Methods tests the DockerService getter methods.
 func TestDockerService_Methods(t *testing.T) {

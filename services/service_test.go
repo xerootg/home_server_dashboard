@@ -17,6 +17,11 @@ func TestServiceInfo_JSONSerialization(t *testing.T) {
 		Image:         "nginx:latest",
 		Source:        "docker",
 		Host:          "nas",
+		HostIP:        "192.168.1.100",
+		Ports: []PortInfo{
+			{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+			{HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
+		},
 	}
 
 	// Serialize to JSON
@@ -57,6 +62,24 @@ func TestServiceInfo_JSONSerialization(t *testing.T) {
 	if decoded.Host != info.Host {
 		t.Errorf("Host = %v, want %v", decoded.Host, info.Host)
 	}
+	if decoded.HostIP != info.HostIP {
+		t.Errorf("HostIP = %v, want %v", decoded.HostIP, info.HostIP)
+	}
+	// Verify Ports
+	if len(decoded.Ports) != len(info.Ports) {
+		t.Errorf("Ports length = %v, want %v", len(decoded.Ports), len(info.Ports))
+	}
+	for i, port := range decoded.Ports {
+		if port.HostPort != info.Ports[i].HostPort {
+			t.Errorf("Ports[%d].HostPort = %v, want %v", i, port.HostPort, info.Ports[i].HostPort)
+		}
+		if port.ContainerPort != info.Ports[i].ContainerPort {
+			t.Errorf("Ports[%d].ContainerPort = %v, want %v", i, port.ContainerPort, info.Ports[i].ContainerPort)
+		}
+		if port.Protocol != info.Ports[i].Protocol {
+			t.Errorf("Ports[%d].Protocol = %v, want %v", i, port.Protocol, info.Ports[i].Protocol)
+		}
+	}
 }
 
 // TestServiceInfo_JSONFieldNames tests that JSON field names are correct.
@@ -70,6 +93,10 @@ func TestServiceInfo_JSONFieldNames(t *testing.T) {
 		Image:         "image",
 		Source:        "docker",
 		Host:          "host",
+		HostIP:        "192.168.1.1",
+		Ports: []PortInfo{
+			{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+		},
 	}
 
 	data, err := json.Marshal(info)
@@ -88,6 +115,11 @@ func TestServiceInfo_JSONFieldNames(t *testing.T) {
 		`"image"`,
 		`"source"`,
 		`"host"`,
+		`"host_ip"`,
+		`"ports"`,
+		`"host_port"`,
+		`"container_port"`,
+		`"protocol"`,
 	}
 
 	for _, field := range expectedFields {
@@ -188,5 +220,100 @@ func TestServiceSourceValues(t *testing.T) {
 		if info.Source != source {
 			t.Errorf("Source assignment failed for %s", source)
 		}
+	}
+}
+
+// TestPortInfo_JSONSerialization tests that PortInfo serializes correctly.
+func TestPortInfo_JSONSerialization(t *testing.T) {
+	tests := []struct {
+		name string
+		port PortInfo
+	}{
+		{
+			name: "TCP port",
+			port: PortInfo{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+		},
+		{
+			name: "UDP port",
+			port: PortInfo{HostPort: 53, ContainerPort: 53, Protocol: "udp"},
+		},
+		{
+			name: "High port numbers",
+			port: PortInfo{HostPort: 65535, ContainerPort: 65535, Protocol: "tcp"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.port)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+
+			var decoded PortInfo
+			err = json.Unmarshal(data, &decoded)
+			if err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+
+			if decoded.HostPort != tt.port.HostPort {
+				t.Errorf("HostPort = %v, want %v", decoded.HostPort, tt.port.HostPort)
+			}
+			if decoded.ContainerPort != tt.port.ContainerPort {
+				t.Errorf("ContainerPort = %v, want %v", decoded.ContainerPort, tt.port.ContainerPort)
+			}
+			if decoded.Protocol != tt.port.Protocol {
+				t.Errorf("Protocol = %v, want %v", decoded.Protocol, tt.port.Protocol)
+			}
+		})
+	}
+}
+
+// TestServiceInfo_NilPorts tests that nil Ports field serializes correctly.
+func TestServiceInfo_NilPorts(t *testing.T) {
+	info := ServiceInfo{
+		Name:   "test",
+		Source: "docker",
+		Ports:  nil,
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var decoded ServiceInfo
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	// nil and empty slice should both result in nil/empty after roundtrip
+	if decoded.Ports != nil && len(decoded.Ports) != 0 {
+		t.Errorf("Ports should be nil or empty, got %v", decoded.Ports)
+	}
+}
+
+// TestServiceInfo_EmptyPorts tests that empty Ports slice serializes correctly.
+func TestServiceInfo_EmptyPorts(t *testing.T) {
+	info := ServiceInfo{
+		Name:   "test",
+		Source: "docker",
+		Ports:  []PortInfo{},
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var decoded ServiceInfo
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if len(decoded.Ports) != 0 {
+		t.Errorf("Ports should be empty, got %v", decoded.Ports)
 	}
 }

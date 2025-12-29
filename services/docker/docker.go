@@ -72,6 +72,9 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 			}
 		}
 
+		// Extract non-localhost exposed ports
+		ports := extractExposedPorts(ctr.Ports)
+
 		result = append(result, services.ServiceInfo{
 			Name:          service,
 			Project:       project,
@@ -81,10 +84,42 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 			Image:         ctr.Image,
 			Source:        "docker",
 			Host:          p.hostName,
+			Ports:         ports,
 		})
 	}
 
 	return result, nil
+}
+
+// extractExposedPorts filters ports to only include those bound to non-localhost addresses.
+// This includes ports bound to 0.0.0.0 (all interfaces) or empty IP (also all interfaces).
+// Deduplicates ports by host_port:protocol combination.
+func extractExposedPorts(ports []container.Port) []services.PortInfo {
+	seen := make(map[string]bool)
+	var result []services.PortInfo
+	for _, port := range ports {
+		// Skip ports without a public port (not published)
+		if port.PublicPort == 0 {
+			continue
+		}
+		// Skip localhost-only bindings (127.0.0.1)
+		if port.IP == "127.0.0.1" {
+			continue
+		}
+		// Deduplicate by host_port:protocol
+		key := fmt.Sprintf("%d:%s", port.PublicPort, port.Type)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		// Include ports bound to 0.0.0.0, empty (all interfaces), or specific non-localhost IPs
+		result = append(result, services.PortInfo{
+			HostPort:      port.PublicPort,
+			ContainerPort: port.PrivatePort,
+			Protocol:      port.Type,
+		})
+	}
+	return result
 }
 
 // GetService returns a specific Docker service by container name.
@@ -137,6 +172,9 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 	project := inspect.Config.Labels["com.docker.compose.project"]
 	service := inspect.Config.Labels["com.docker.compose.service"]
 
+	// Extract non-localhost exposed ports from network settings
+	ports := extractPortsFromInspect(inspect.NetworkSettings)
+
 	return services.ServiceInfo{
 		Name:          service,
 		Project:       project,
@@ -146,7 +184,61 @@ func (s *DockerService) GetInfo(ctx context.Context) (services.ServiceInfo, erro
 		Image:         inspect.Image,
 		Source:        "docker",
 		Host:          s.hostName,
+		Ports:         ports,
 	}, nil
+}
+
+// extractPortsFromInspect extracts non-localhost ports from container inspect network settings.
+// Deduplicates ports by host_port:protocol combination.
+func extractPortsFromInspect(settings *container.NetworkSettings) []services.PortInfo {
+	if settings == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []services.PortInfo
+	for portProto, bindings := range settings.Ports {
+		for _, binding := range bindings {
+			// Skip localhost-only bindings
+			if binding.HostIP == "127.0.0.1" {
+				continue
+			}
+			// Parse host port
+			hostPort := parsePort(binding.HostPort)
+			if hostPort == 0 {
+				continue
+			}
+			// Deduplicate by host_port:protocol
+			key := fmt.Sprintf("%d:%s", hostPort, portProto.Proto())
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, services.PortInfo{
+				HostPort:      hostPort,
+				ContainerPort: uint16(portProto.Int()),
+				Protocol:      portProto.Proto(),
+			})
+		}
+	}
+	return result
+}
+
+// parsePort parses a port string to uint16.
+func parsePort(s string) uint16 {
+	if s == "" {
+		return 0
+	}
+	var port int
+	n, err := fmt.Sscanf(s, "%d", &port)
+	if err != nil || n != 1 || port < 0 || port > 65535 {
+		return 0
+	}
+	// Ensure the entire string was a valid number (no trailing chars)
+	expected := fmt.Sprintf("%d", port)
+	if s != expected {
+		return 0
+	}
+	return uint16(port)
 }
 
 // GetLogs returns a stream of logs for the container.

@@ -45,6 +45,18 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function renderPorts(ports, hostIP) {
+    if (!ports || ports.length === 0) {
+        return '';
+    }
+    // Use hostIP if available, otherwise fall back to current hostname
+    const targetHost = hostIP || window.location.hostname;
+    return ports.map(port => {
+        const url = `http://${targetHost}:${port.host_port}`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="port-link badge bg-info text-dark me-1" onclick="event.stopPropagation();" title="Open port ${port.host_port} (${port.protocol})">:${port.host_port}</a>`;
+    }).join('');
+}
+
 function renderServices(services, updateStats = true) {
     // Close any open logs first
     closeLogs();
@@ -80,10 +92,11 @@ function renderServices(services, updateStats = true) {
         const statusClass = getStatusClass(service.state, service.status);
         const sourceIcon = service.source === 'systemd' ? '<i class="bi bi-gear-fill text-info" title="systemd"></i>' : '<i class="bi bi-box text-primary" title="Docker"></i>';
         const hostBadge = service.host ? `<span class="badge bg-secondary">${escapeHtml(service.host)}</span>` : '';
+        const portsHtml = renderPorts(service.ports, service.host_ip);
 
         return `
             <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}">
-                <td>${sourceIcon} ${escapeHtml(service.name)}</td>
+                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml}</td>
                 <td>${escapeHtml(service.project)}</td>
                 <td>${hostBadge}</td>
                 <td><code class="small">${escapeHtml(service.container_name)}</code></td>

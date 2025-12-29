@@ -12,8 +12,7 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load("services.json")
 	if err != nil {
-		log.Printf("Warning: %v - using defaults", err)
-		cfg = config.Default()
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	log.Printf("Loaded config with %d hosts", len(cfg.Hosts))
 

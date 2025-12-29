@@ -154,6 +154,19 @@ th.sortable:hover {
     white-space: nowrap;
 }
 
+/* Port links */
+.port-link {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8em;
+    text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.port-link:hover {
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(13, 202, 240, 0.4);
+}
+
 /* Inline Logs Row */
 .logs-row td {
     padding: 0 !important;
