@@ -111,18 +111,22 @@ func (p *Provider) GetServicesWithRemaps(ctx context.Context) ([]services.Servic
 		// Check if service should be hidden
 		hidden := isLabelTrue(ctr.Labels[LabelHidden])
 
+		// Extract Traefik service name if explicitly defined in labels
+		traefikServiceName := extractTraefikServiceName(ctr.Labels)
+
 		result = append(result, services.ServiceInfo{
-			Name:          service,
-			Project:       project,
-			ContainerName: containerName,
-			State:         ctr.State,
-			Status:        ctr.Status,
-			Image:         ctr.Image,
-			Source:        "docker",
-			Host:          p.hostName,
-			Ports:         ports,
-			Description:   description,
-			Hidden:        hidden,
+			Name:               service,
+			Project:            project,
+			ContainerName:      containerName,
+			State:              ctr.State,
+			Status:             ctr.Status,
+			Image:              ctr.Image,
+			Source:             "docker",
+			Host:               p.hostName,
+			Ports:              ports,
+			Description:        description,
+			Hidden:             hidden,
+			TraefikServiceName: traefikServiceName,
 		})
 	}
 
@@ -215,6 +219,26 @@ type PortRemap struct {
 	Port          uint16 // The host port to remap
 	TargetService string // The service name that should own this port
 	SourceService string // The service name that exposes this port
+}
+
+// traefikServicesPrefix is the prefix for Traefik HTTP services labels.
+const traefikServicesPrefix = "traefik.http.services."
+
+// extractTraefikServiceName extracts the Traefik service name from Docker labels.
+// Traefik service labels follow the pattern: traefik.http.services.<name>.loadbalancer...
+// Returns empty string if no Traefik service label is found.
+func extractTraefikServiceName(labels map[string]string) string {
+	for key := range labels {
+		if !strings.HasPrefix(key, traefikServicesPrefix) {
+			continue
+		}
+		// Extract service name from: traefik.http.services.<name>.loadbalancer...
+		rest := strings.TrimPrefix(key, traefikServicesPrefix)
+		if idx := strings.Index(rest, "."); idx > 0 {
+			return rest[:idx]
+		}
+	}
+	return ""
 }
 
 // parsePortRemaps extracts port remapping information from container labels.

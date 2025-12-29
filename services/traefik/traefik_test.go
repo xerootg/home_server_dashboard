@@ -55,14 +55,19 @@ func TestExtractHostnames(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name:     "host with subdomain wildcard pattern",
+			name:     "host with subdomain wildcard pattern - no Host() present",
 			rule:     "HostRegexp(`{subdomain:[a-z]+}.example.com`)",
-			expected: nil, // HostRegexp is not extracted, only Host
+			expected: []string{"example.com"}, // Extracts domain from HostRegexp when no Host() present
 		},
 		{
 			name:     "host with spaces around",
 			rule:     "Host( `example.com` )",
 			expected: []string{"example.com"},
+		},
+		{
+			name:     "authentik-style rule - Host preferred over HostRegexp",
+			rule:     "Host(`authentik.themissing.xyz`) || HostRegexp(`{subdomain:[a-z0-9]+}.themissing.xyz`) && (PathPrefix(`/outpost.goauthentik.io/`) || PathPrefix(`/admin/outpost.goauthentik.io/`))",
+			expected: []string{"authentik.themissing.xyz"}, // Only Host() extracted, HostRegexp ignored
 		},
 	}
 

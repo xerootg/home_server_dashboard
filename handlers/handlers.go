@@ -188,8 +188,16 @@ func enrichWithTraefikURLs(ctx context.Context, cfg *config.Config, svcList []se
 	for i := range svcList {
 		svc := &svcList[i]
 
-		// Try to match by service name (the Name field is the service name for Docker Compose)
-		hostnames := traefikMappings[svc.Name]
+		// Try to match by Traefik service name if explicitly defined in labels
+		var hostnames []string
+		if svc.TraefikServiceName != "" {
+			hostnames = traefikMappings[svc.TraefikServiceName]
+		}
+
+		// Fall back to matching by service name (the Name field is the service name for Docker Compose)
+		if len(hostnames) == 0 {
+			hostnames = traefikMappings[svc.Name]
+		}
 
 		// Traefik often names services as "servicename-projectname", so try that pattern
 		if len(hostnames) == 0 && svc.Project != "" && svc.Project != "systemd" {

@@ -827,3 +827,80 @@ func TestParsePortRemaps(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractTraefikServiceName tests the extractTraefikServiceName function.
+func TestExtractTraefikServiceName(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected string
+	}{
+		{
+			name:     "no labels",
+			labels:   map[string]string{},
+			expected: "",
+		},
+		{
+			name: "no traefik labels",
+			labels: map[string]string{
+				"com.docker.compose.service": "myapp",
+			},
+			expected: "",
+		},
+		{
+			name: "traefik service with loadbalancer",
+			labels: map[string]string{
+				"traefik.http.services.authentik.loadbalancer.server.port": "9000",
+			},
+			expected: "authentik",
+		},
+		{
+			name: "traefik service with multiple labels",
+			labels: map[string]string{
+				"traefik.http.services.myapp.loadbalancer.server.port":   "8080",
+				"traefik.http.services.myapp.loadbalancer.server.scheme": "http",
+			},
+			expected: "myapp",
+		},
+		{
+			name: "traefik router but no service label",
+			labels: map[string]string{
+				"traefik.http.routers.myapp.rule": "Host(`myapp.example.com`)",
+			},
+			expected: "",
+		},
+		{
+			name: "service name with hyphen",
+			labels: map[string]string{
+				"traefik.http.services.my-app-service.loadbalancer.server.port": "3000",
+			},
+			expected: "my-app-service",
+		},
+		{
+			name: "service name with underscore",
+			labels: map[string]string{
+				"traefik.http.services.my_app_service.loadbalancer.server.port": "3000",
+			},
+			expected: "my_app_service",
+		},
+		{
+			name: "authentik server example",
+			labels: map[string]string{
+				"traefik.enable":                                             "true",
+				"traefik.http.routers.authentik.rule":                        "Host(`authentik.themissing.xyz`)",
+				"traefik.http.services.authentik.loadbalancer.server.port":   "9000",
+				"traefik.http.services.authentik.loadbalancer.server.scheme": "http",
+			},
+			expected: "authentik",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractTraefikServiceName(tt.labels)
+			if result != tt.expected {
+				t.Errorf("extractTraefikServiceName() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}

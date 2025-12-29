@@ -40,7 +40,9 @@ home_server_dashboard/
 │   │   └── systemd_integration_test.go # Integration tests (requires systemd)
 │   └── traefik/
 │       ├── traefik.go             # Traefik API client for hostname lookup
-│       └── traefik_test.go        # Unit tests for Traefik client
+│       ├── traefik_test.go        # Unit tests for Traefik client
+│       ├── matcher.go             # MatcherLookupService for hostname extraction with state tracking
+│       └── matcher_test.go        # Unit tests for matcher lookup service
 ├── static/
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
@@ -135,18 +137,29 @@ home_server_dashboard/
 - **Purpose:** Traefik API client for hostname discovery
 - **Key Types:**
   - `Config` — Traefik API connection settings (Enabled, APIPort)
-  - `Client` — HTTP client for querying Traefik API
+  - `Client` — HTTP client for querying Traefik API (includes MatcherLookupService)
   - `Router` — Represents a Traefik HTTP router
+  - `MatcherLookupService` — Stateful hostname extraction with change tracking
+  - `MatcherInfo` — Detailed matcher information (type, hostname, exactness)
+  - `MatcherType` — Enum: `MatcherTypeHost`, `MatcherTypeHostRegexp`
+  - `RouterMatcherState` — Tracks rule changes and error states per router
 - **Key Functions:**
-  - `NewClient()` — Creates a new Traefik API client
+  - `NewClient()` — Creates a new Traefik API client with embedded matcher service
   - `GetRouters()` — Fetches all HTTP routers from Traefik API
-  - `GetServiceHostMappings()` — Returns map of service names to hostnames
-  - `ExtractHostnames()` — Parses Host() matchers from Traefik rules
+  - `GetServiceHostMappings()` — Returns map of service names to hostnames (uses matcher service)
+  - `ExtractHostnames()` — Parses Host() and HostRegexp() matchers from Traefik rules
+  - `ExtractMatchers()` — Returns detailed MatcherInfo for each hostname matcher
+  - `NewMatcherLookupService()` — Creates a matcher service for state-tracked extraction
+  - `ProcessRouter()` — Extracts hostnames with state tracking and logging
 - **Features:**
   - Queries Traefik REST API at `/api/http/routers`
-  - Extracts hostnames from `Host()` rule matchers
+  - Extracts hostnames from both `Host()` and `HostRegexp()` rule matchers
+  - **Host() Preferred:** When both `Host()` and `HostRegexp()` are present, only exact `Host()` matches are used
   - Supports SSH tunneling for remote Traefik instances
   - Matches services by normalized name (strips `@provider` suffix)
+  - **State Tracking:** Logs when router rules change between fetches
+  - **Error Recovery:** Logs when a previously-failing router recovers
+  - **HostRegexp Fallback:** Extracts domain suffixes from regex patterns only when no `Host()` is present (e.g., `{subdomain:[a-z]+}.example.com` → `example.com`)
 
 ## Configuration (services.json)
 
@@ -231,6 +244,7 @@ type ServiceInfo struct {
     HostIP        string     `json:"host_ip"`                 // Private IP address for port links
     Ports         []PortInfo `json:"ports"`                   // Exposed ports (non-localhost bindings)
     TraefikURLs   []string   `json:"traefik_urls"`            // Traefik-exposed hostnames (as full URLs)
+    TraefikServiceName string `json:"traefik_service_name,omitempty"` // Traefik service name from labels (if different from Name)
     Description   string     `json:"description"`             // Service description (from Docker label or systemd unit)
     Hidden        bool       `json:"hidden,omitempty"`        // If true, service should be hidden from UI
 }

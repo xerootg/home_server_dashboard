@@ -6,11 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -39,11 +37,14 @@ type Client struct {
 	hostAddress string
 	apiPort     int
 	httpClient  *http.Client
-	
+
 	// SSH tunnel management
-	tunnelMu    sync.Mutex
-	tunnelCmd   *exec.Cmd
-	localPort   int
+	tunnelMu  sync.Mutex
+	tunnelCmd *exec.Cmd
+	localPort int
+
+	// Matcher lookup service for hostname extraction with state tracking
+	matcherService *MatcherLookupService
 }
 
 // NewClient creates a new Traefik API client.
@@ -53,9 +54,10 @@ func NewClient(hostName, hostAddress string, apiPort int) *Client {
 		apiPort = 8080 // Default Traefik API port
 	}
 	return &Client{
-		hostName:    hostName,
-		hostAddress: hostAddress,
-		apiPort:     apiPort,
+		hostName:       hostName,
+		hostAddress:    hostAddress,
+		apiPort:        apiPort,
+		matcherService: NewMatcherLookupService(hostName),
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -190,23 +192,18 @@ func (c *Client) GetRouters(ctx context.Context) ([]Router, error) {
 	return routers, nil
 }
 
-// hostPattern matches Host(`hostname`) in Traefik rules.
-// Supports both single and double quotes, and backticks.
-var hostPattern = regexp.MustCompile(`Host\s*\(\s*[\x60"']([^)\x60"']+)[\x60"']\s*\)`)
-
-// warnedHostRegexp tracks which routers have already logged HostRegexp warnings
-// to avoid spamming logs on every refresh.
-var warnedHostRegexp = make(map[string]bool)
-var warnedHostRegexpMu sync.Mutex
-
 // ExtractHostnames extracts all hostnames from a Traefik rule string.
 // Handles rules like: Host(`example.com`), Host(`a.com`) || Host(`b.com`)
+// Also handles HostRegexp patterns where possible.
+// This is a convenience function that creates a temporary matcher service.
 func ExtractHostnames(rule string) []string {
-	matches := hostPattern.FindAllStringSubmatch(rule, -1)
+	matchers := ExtractMatchers(rule)
 	var hostnames []string
-	for _, match := range matches {
-		if len(match) > 1 {
-			hostnames = append(hostnames, match[1])
+	seen := make(map[string]bool)
+	for _, m := range matchers {
+		if !seen[m.Hostname] {
+			hostnames = append(hostnames, m.Hostname)
+			seen[m.Hostname] = true
 		}
 	}
 	return hostnames
@@ -220,37 +217,28 @@ type ServiceHostMapping struct {
 
 // GetServiceHostMappings fetches all routers and extracts service->hostname mappings.
 // The serviceName in the mapping will be the Traefik service name (e.g., "myservice@docker").
+// Uses the MatcherLookupService to track state changes and log appropriately.
 func (c *Client) GetServiceHostMappings(ctx context.Context) (map[string][]string, error) {
 	routers, err := c.GetRouters(ctx)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := make(map[string][]string)
 	for _, router := range routers {
 		if router.Status != "enabled" {
 			continue
 		}
 
-		// Warn about HostRegexp patterns - we can't reliably extract hostnames from regex
-		// Only log once per router to avoid log spam on refreshes
-		if strings.Contains(router.Rule, "HostRegexp") {
-			warnedHostRegexpMu.Lock()
-			if !warnedHostRegexp[router.Name] {
-				warnedHostRegexp[router.Name] = true
-				log.Printf("Warning: router %q uses HostRegexp which cannot be extracted as a static hostname. Rule: %s", router.Name, router.Rule)
-			}
-			warnedHostRegexpMu.Unlock()
-		}
-
-		hostnames := ExtractHostnames(router.Rule)
+		// Use the matcher service to process the router with state tracking
+		hostnames := c.matcherService.ProcessRouter(router.Name, router.Rule, nil)
 		if len(hostnames) == 0 {
 			continue
 		}
-		
+
 		// Traefik service names may have @provider suffix, normalize to just the service name
 		serviceName := normalizeServiceName(router.Service)
-		
+
 		existing := result[serviceName]
 		for _, h := range hostnames {
 			// Avoid duplicates
@@ -267,8 +255,13 @@ func (c *Client) GetServiceHostMappings(ctx context.Context) (map[string][]strin
 		}
 		result[serviceName] = existing
 	}
-	
+
 	return result, nil
+}
+
+// GetMatcherService returns the matcher lookup service for advanced state management.
+func (c *Client) GetMatcherService() *MatcherLookupService {
+	return c.matcherService
 }
 
 // normalizeServiceName strips the @provider suffix from Traefik service names.
