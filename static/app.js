@@ -49,16 +49,39 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function renderPorts(ports, hostIP) {
+// Scroll to a service row in the table and highlight it briefly
+function scrollToService(serviceName, host) {
+    // Find the service row by data attributes
+    const selector = `tr.service-row[data-service="${CSS.escape(serviceName)}"][data-host="${CSS.escape(host)}"]`;
+    const row = document.querySelector(selector);
+    if (row) {
+        // Scroll the row into view
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Add highlight animation (blinks 8 times at 0.4s each = 3.2 seconds)
+        row.classList.add('highlight-row');
+        setTimeout(() => {
+            row.classList.remove('highlight-row');
+        }, 3200);
+    }
+}
+
+// Find a service's host_ip by name and host
+function getServiceHostIP(serviceName, host) {
+    const service = allServices.find(s => s.name === serviceName && s.host === host);
+    return service ? service.host_ip : null;
+}
+
+function renderPorts(ports, hostIP, currentService) {
     if (!ports || ports.length === 0) {
         return '';
     }
     // Use hostIP if available, otherwise fall back to current hostname
     const targetHost = hostIP || window.location.hostname;
+    const currentHost = currentService ? currentService.host : '';
+    
     return ports
         .filter(port => !port.hidden) // Filter out hidden ports
         .map(port => {
-            const url = `http://${targetHost}:${port.host_port}`;
             // Determine display text and styling based on port remapping
             // - source_service: port is remapped TO this service FROM source_service
             // - target_service: port is remapped FROM this service TO target_service
@@ -67,23 +90,30 @@ function renderPorts(ports, hostIP) {
             let badgeClass = 'port-link badge bg-info text-dark me-1';
             
             if (port.label) {
-                // Custom label takes precedence
+                // Custom label takes precedence - use current service's host IP
+                const url = `http://${targetHost}:${port.host_port}`;
                 displayText = escapeHtml(port.label);
                 titleText = `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
             } else if (port.target_service) {
-                // This port is remapped to another service - show target and de-emphasize
+                // This port is remapped to another service - clicking scrolls to that service
                 displayText = `<i class="bi bi-arrow-right me-1"></i>${escapeHtml(port.target_service)}:${port.host_port}`;
-                titleText = `Port ${port.host_port} remapped to ${escapeHtml(port.target_service)} (${port.protocol})`;
-                badgeClass = 'port-link badge bg-secondary text-light me-1'; // De-emphasized style
+                titleText = `Click to go to ${escapeHtml(port.target_service)} (port ${port.host_port}, ${port.protocol})`;
+                badgeClass = 'port-link-scroll badge bg-secondary text-light me-1'; // De-emphasized style
+                return `<span class="${badgeClass}" onclick="event.stopPropagation(); scrollToService('${escapeHtml(port.target_service)}', '${escapeHtml(currentHost)}');" title="${titleText}" style="cursor: pointer;">${displayText}</span>`;
             } else if (port.source_service) {
-                // This port comes from another service
+                // This port comes from another service - link to the source service's IP:port
+                const sourceIP = getServiceHostIP(port.source_service, currentHost) || targetHost;
+                const url = `http://${sourceIP}:${port.host_port}`;
                 displayText = `${escapeHtml(port.source_service)}:${port.host_port}`;
-                titleText = `Port ${port.host_port} from ${escapeHtml(port.source_service)} (${port.protocol})`;
+                titleText = `Open port ${port.host_port} on ${escapeHtml(port.source_service)} (${port.protocol})`;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
             } else {
+                const url = `http://${targetHost}:${port.host_port}`;
                 displayText = `:${port.host_port}`;
                 titleText = `Open port ${port.host_port} (${port.protocol})`;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
             }
-            return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
         }).join('');
 }
 
@@ -167,7 +197,7 @@ function renderServices(services, updateStats = true) {
         const statusClass = getStatusClass(service.state, service.status);
         const sourceIcons = getSourceIcons(service);
         const hostBadge = service.host ? `<span class="badge bg-secondary">${escapeHtml(service.host)}</span>` : '';
-        const portsHtml = renderPorts(service.ports, service.host_ip);
+        const portsHtml = renderPorts(service.ports, service.host_ip, service);
         const traefikHtml = renderTraefikURLs(service.traefik_urls);
         const descriptionHtml = service.description ? `<div class="service-description text-muted small">${escapeHtml(service.description)}</div>` : '';
         const controlButtons = renderControlButtons(service);

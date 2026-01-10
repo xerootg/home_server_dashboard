@@ -426,8 +426,8 @@ services:
     image: lscr.io/linuxserver/qbittorrent
     network_mode: "service:gluetun"  # Uses gluetun's network
     # Port 8193 will appear on both services:
-    # - On gluetun: "→qbittorrent-books:8193" (de-emphasized, grey badge with arrow icon)
-    # - On qbittorrent-books: "gluetun:8193" (normal info badge)
+    # - On gluetun: "→qbittorrent-books:8193" (de-emphasized, grey badge) - clicking scrolls to qbittorrent-books row
+    # - On qbittorrent-books: "gluetun:8193" (normal info badge) - clicking opens URL using gluetun's IP:port
 ```
 
 **Systemd Integration (`services/systemd/systemd.go`):**
@@ -467,6 +467,9 @@ services:
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
 - **Port links**: Clickable badges after service name showing exposed ports (non-localhost only), opens HTTP URL on click
+- **Remapped port links**: For services sharing network namespaces (e.g., VPN containers):
+  - On source service (e.g., gluetun): grey badge with arrow "→target:port" - clicking scrolls to target service row with highlight animation
+  - On target service (e.g., qbittorrent): info badge "source:port" - clicking opens URL using the source service's IP
 - **Traefik links**: Green clickable badges showing Traefik-exposed hostnames, opens HTTPS URL on click
 - **Service descriptions**: Muted text below service name showing description (from Docker label `home.server.dashboard.description` or systemd unit description)
 - **Table search**: VS Code-style search widget below filter cards

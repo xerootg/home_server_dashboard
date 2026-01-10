@@ -926,6 +926,314 @@ describe('Table Search - Service Matching', () => {
 });
 
 // ============================================================================
+// Port Navigation Functions (extracted from app.js for testing)
+// ============================================================================
+
+// Simulated global state for allServices
+let allServices = [];
+
+// Simulated escapeHtml function
+function escapeHtml(text) {
+    const div = { textContent: '', innerHTML: '' };
+    div.textContent = text;
+    // Simple escape for testing - in browser this uses DOM
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Find a service's host_ip by name and host
+function getServiceHostIP(serviceName, host) {
+    const service = allServices.find(s => s.name === serviceName && s.host === host);
+    return service ? service.host_ip : null;
+}
+
+// Simulated renderPorts function (core logic extracted for testing)
+function renderPortData(ports, hostIP, currentService) {
+    if (!ports || ports.length === 0) {
+        return [];
+    }
+    const targetHost = hostIP || 'localhost';
+    const currentHost = currentService ? currentService.host : '';
+    
+    return ports
+        .filter(port => !port.hidden)
+        .map(port => {
+            let type; // 'link', 'scroll', 'source-link'
+            let displayText;
+            let titleText;
+            let url = null;
+            let scrollTarget = null;
+            let badgeClass;
+            
+            if (port.label) {
+                type = 'link';
+                url = `http://${targetHost}:${port.host_port}`;
+                displayText = port.label;
+                titleText = `${port.label} - Port ${port.host_port} (${port.protocol})`;
+                badgeClass = 'port-link badge bg-info text-dark me-1';
+            } else if (port.target_service) {
+                type = 'scroll';
+                scrollTarget = { serviceName: port.target_service, host: currentHost };
+                displayText = `→${port.target_service}:${port.host_port}`;
+                titleText = `Click to go to ${port.target_service} (port ${port.host_port}, ${port.protocol})`;
+                badgeClass = 'port-link-scroll badge bg-secondary text-light me-1';
+            } else if (port.source_service) {
+                type = 'source-link';
+                const sourceIP = getServiceHostIP(port.source_service, currentHost) || targetHost;
+                url = `http://${sourceIP}:${port.host_port}`;
+                displayText = `${port.source_service}:${port.host_port}`;
+                titleText = `Open port ${port.host_port} on ${port.source_service} (${port.protocol})`;
+                badgeClass = 'port-link badge bg-info text-dark me-1';
+            } else {
+                type = 'link';
+                url = `http://${targetHost}:${port.host_port}`;
+                displayText = `:${port.host_port}`;
+                titleText = `Open port ${port.host_port} (${port.protocol})`;
+                badgeClass = 'port-link badge bg-info text-dark me-1';
+            }
+            
+            return { type, displayText, titleText, url, scrollTarget, badgeClass, port };
+        });
+}
+
+function resetPortNavigationState() {
+    allServices = [];
+}
+
+// ============================================================================
+// Port Navigation Tests
+// ============================================================================
+
+describe('getServiceHostIP', () => {
+    test('returns host_ip for matching service', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'firefox', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        assertEqual(getServiceHostIP('gluetun', 'nas'), '192.168.1.10');
+    });
+
+    test('returns null for non-existent service', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        assertEqual(getServiceHostIP('nonexistent', 'nas'), null);
+    });
+
+    test('returns null for wrong host', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        assertEqual(getServiceHostIP('gluetun', 'other-host'), null);
+    });
+
+    test('handles empty allServices array', () => {
+        allServices = [];
+        assertEqual(getServiceHostIP('gluetun', 'nas'), null);
+    });
+
+    test('returns correct IP when multiple hosts have same service name', () => {
+        allServices = [
+            { name: 'nginx', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'nginx', host: 'cloud', host_ip: '10.0.0.5' }
+        ];
+        assertEqual(getServiceHostIP('nginx', 'nas'), '192.168.1.10');
+        assertEqual(getServiceHostIP('nginx', 'cloud'), '10.0.0.5');
+    });
+});
+
+describe('renderPortData - Regular Ports', () => {
+    test('returns empty array for null ports', () => {
+        resetPortNavigationState();
+        const result = renderPortData(null, '192.168.1.10', { host: 'nas' });
+        assertDeepEqual(result, []);
+    });
+
+    test('returns empty array for empty ports', () => {
+        resetPortNavigationState();
+        const result = renderPortData([], '192.168.1.10', { host: 'nas' });
+        assertDeepEqual(result, []);
+    });
+
+    test('renders regular port as link', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 8080, container_port: 80, protocol: 'tcp' }];
+        const result = renderPortData(ports, '192.168.1.10', { host: 'nas' });
+        assertEqual(result.length, 1);
+        assertEqual(result[0].type, 'link');
+        assertEqual(result[0].url, 'http://192.168.1.10:8080');
+        assertEqual(result[0].displayText, ':8080');
+        assert(result[0].titleText.includes('8080'));
+    });
+
+    test('uses localhost when hostIP is null', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 3000, protocol: 'tcp' }];
+        const result = renderPortData(ports, null, { host: 'nas' });
+        assertEqual(result[0].url, 'http://localhost:3000');
+    });
+
+    test('filters hidden ports', () => {
+        resetPortNavigationState();
+        const ports = [
+            { host_port: 8080, protocol: 'tcp', hidden: false },
+            { host_port: 9000, protocol: 'tcp', hidden: true },
+            { host_port: 3000, protocol: 'tcp' }
+        ];
+        const result = renderPortData(ports, '192.168.1.10', { host: 'nas' });
+        assertEqual(result.length, 2);
+        assertEqual(result[0].port.host_port, 8080);
+        assertEqual(result[1].port.host_port, 3000);
+    });
+});
+
+describe('renderPortData - Labeled Ports', () => {
+    test('uses custom label for display', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 8080, protocol: 'tcp', label: 'Admin' }];
+        const result = renderPortData(ports, '192.168.1.10', { host: 'nas' });
+        assertEqual(result[0].type, 'link');
+        assertEqual(result[0].displayText, 'Admin');
+        assert(result[0].titleText.includes('Admin'));
+        assertEqual(result[0].url, 'http://192.168.1.10:8080');
+    });
+});
+
+describe('renderPortData - Target Service Ports (scroll behavior)', () => {
+    test('renders target_service port as scroll action', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 8193, protocol: 'tcp', target_service: 'qbittorrent' }];
+        const result = renderPortData(ports, '192.168.1.10', { host: 'nas' });
+        assertEqual(result.length, 1);
+        assertEqual(result[0].type, 'scroll');
+        assertEqual(result[0].url, null);
+        assertDeepEqual(result[0].scrollTarget, { serviceName: 'qbittorrent', host: 'nas' });
+        assertEqual(result[0].displayText, '→qbittorrent:8193');
+        assert(result[0].titleText.includes('qbittorrent'));
+        assert(result[0].titleText.includes('Click to go to'));
+    });
+
+    test('uses current service host for scroll target', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 8193, protocol: 'tcp', target_service: 'firefox' }];
+        const result = renderPortData(ports, '192.168.1.10', { host: 'cloud-server' });
+        assertEqual(result[0].scrollTarget.host, 'cloud-server');
+    });
+
+    test('handles missing current service host', () => {
+        resetPortNavigationState();
+        const ports = [{ host_port: 8193, protocol: 'tcp', target_service: 'firefox' }];
+        const result = renderPortData(ports, '192.168.1.10', null);
+        assertEqual(result[0].scrollTarget.host, '');
+    });
+});
+
+describe('renderPortData - Source Service Ports (link to source IP)', () => {
+    test('renders source_service port with source IP', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'firefox', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        const ports = [{ host_port: 8193, protocol: 'tcp', source_service: 'gluetun' }];
+        const currentService = { name: 'firefox', host: 'nas' };
+        const result = renderPortData(ports, '192.168.1.10', currentService);
+        assertEqual(result.length, 1);
+        assertEqual(result[0].type, 'source-link');
+        assertEqual(result[0].url, 'http://192.168.1.10:8193');
+        assertEqual(result[0].displayText, 'gluetun:8193');
+        assert(result[0].titleText.includes('gluetun'));
+    });
+
+    test('falls back to target host when source service not found', () => {
+        allServices = [
+            { name: 'firefox', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        const ports = [{ host_port: 8193, protocol: 'tcp', source_service: 'missing-vpn' }];
+        const currentService = { name: 'firefox', host: 'nas' };
+        const result = renderPortData(ports, '10.0.0.1', currentService);
+        // Should fall back to the passed hostIP since source not found
+        assertEqual(result[0].url, 'http://10.0.0.1:8193');
+    });
+
+    test('uses correct source IP from different host', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'gluetun', host: 'cloud', host_ip: '10.0.0.5' },
+            { name: 'firefox', host: 'cloud', host_ip: '10.0.0.5' }
+        ];
+        const ports = [{ host_port: 8193, protocol: 'tcp', source_service: 'gluetun' }];
+        const currentService = { name: 'firefox', host: 'cloud' };
+        const result = renderPortData(ports, '10.0.0.5', currentService);
+        assertEqual(result[0].url, 'http://10.0.0.5:8193');
+    });
+});
+
+describe('renderPortData - Complex Scenarios', () => {
+    test('handles mixed port types', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'qbittorrent', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        const ports = [
+            { host_port: 8080, protocol: 'tcp' },  // Regular
+            { host_port: 8193, protocol: 'tcp', target_service: 'qbittorrent' },  // Scroll
+            { host_port: 9000, protocol: 'tcp', label: 'Admin' },  // Labeled
+        ];
+        const currentService = { name: 'gluetun', host: 'nas' };
+        const result = renderPortData(ports, '192.168.1.10', currentService);
+        
+        assertEqual(result.length, 3);
+        assertEqual(result[0].type, 'link');
+        assertEqual(result[1].type, 'scroll');
+        assertEqual(result[2].type, 'link');
+        assertEqual(result[2].displayText, 'Admin');
+    });
+
+    test('VPN container with multiple remapped ports', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'qbittorrent-books', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'qbittorrent-movies', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        // Ports on gluetun pointing to other services
+        const gluetunPorts = [
+            { host_port: 8193, protocol: 'tcp', target_service: 'qbittorrent-books' },
+            { host_port: 8194, protocol: 'tcp', target_service: 'qbittorrent-movies' }
+        ];
+        const gluetunService = { name: 'gluetun', host: 'nas' };
+        const result = renderPortData(gluetunPorts, '192.168.1.10', gluetunService);
+        
+        assertEqual(result.length, 2);
+        assertEqual(result[0].type, 'scroll');
+        assertEqual(result[0].scrollTarget.serviceName, 'qbittorrent-books');
+        assertEqual(result[1].type, 'scroll');
+        assertEqual(result[1].scrollTarget.serviceName, 'qbittorrent-movies');
+    });
+
+    test('service with port from VPN container', () => {
+        allServices = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' },
+            { name: 'qbittorrent-books', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        // Port on qbittorrent-books coming from gluetun
+        const qbPorts = [
+            { host_port: 8193, protocol: 'tcp', source_service: 'gluetun' }
+        ];
+        const qbService = { name: 'qbittorrent-books', host: 'nas' };
+        const result = renderPortData(qbPorts, '192.168.1.10', qbService);
+        
+        assertEqual(result.length, 1);
+        assertEqual(result[0].type, 'source-link');
+        assertEqual(result[0].url, 'http://192.168.1.10:8193');
+        assertEqual(result[0].displayText, 'gluetun:8193');
+    });
+});
+
+// ============================================================================
 // Run tests and report
 // ============================================================================
 
