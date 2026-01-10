@@ -46,12 +46,48 @@ const (
 
 // User represents an authenticated user.
 type User struct {
-	ID       string   `json:"id"`
-	Email    string   `json:"email"`
-	Name     string   `json:"name"`
-	Groups   []string `json:"groups"`
-	IsAdmin  bool     `json:"is_admin"`
-	Expiry   time.Time `json:"-"`
+	ID              string              `json:"id"`
+	Email           string              `json:"email"`
+	Name            string              `json:"name"`
+	Groups          []string            `json:"groups"`
+	IsAdmin         bool                `json:"is_admin"`
+	HasGlobalAccess bool                `json:"has_global_access"`
+	AllowedServices map[string][]string `json:"allowed_services,omitempty"` // host -> []service names
+	Expiry          time.Time           `json:"-"`
+}
+
+// CanAccessService checks if the user can access a specific service on a host.
+// Returns true if the user has global access or if the service is in their allowed list.
+func (u *User) CanAccessService(host, serviceName string) bool {
+	if u.HasGlobalAccess {
+		return true
+	}
+	if u.AllowedServices == nil {
+		return false
+	}
+	services, ok := u.AllowedServices[host]
+	if !ok {
+		return false
+	}
+	for _, svc := range services {
+		if svc == serviceName {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAnyAccess returns true if the user has global access or at least one allowed service.
+func (u *User) HasAnyAccess() bool {
+	if u.HasGlobalAccess {
+		return true
+	}
+	for _, services := range u.AllowedServices {
+		if len(services) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Session represents a user session.
@@ -176,9 +212,11 @@ type Provider struct {
 	verifier       *oidc.IDTokenVerifier
 	sessions       *SessionStore
 	states         *StateStore
-	adminClaim     string
-	serviceURLHost string // hostname from service_url for Host header comparison
-	localAdmins    map[string]bool // parsed local admin usernames
+	groupsClaim    string                           // claim name where groups are found
+	adminGroup     string                           // group name that grants admin access
+	serviceURLHost string                           // hostname from service_url for Host header comparison
+	localAdmins    map[string]bool                  // parsed local admin usernames
+	groupConfigs   map[string]*config.OIDCGroupConfig // parsed group configurations
 }
 
 // NewProvider creates a new OIDC provider.
@@ -231,10 +269,14 @@ func NewProvider(ctx context.Context, cfg *config.OIDCConfig, localCfg *config.L
 		ClientID: cfg.ClientID,
 	})
 
-	// Determine admin claim
-	adminClaim := cfg.AdminClaim
-	if adminClaim == "" {
-		adminClaim = "groups"
+	// Determine groups claim and admin group (with defaults)
+	groupsClaim := cfg.GroupsClaim
+	if groupsClaim == "" {
+		groupsClaim = "groups"
+	}
+	adminGroup := cfg.AdminGroup
+	if adminGroup == "" {
+		adminGroup = "admin"
 	}
 
 	return &Provider{
@@ -244,9 +286,11 @@ func NewProvider(ctx context.Context, cfg *config.OIDCConfig, localCfg *config.L
 		verifier:       verifier,
 		sessions:       NewSessionStore(),
 		states:         NewStateStore(),
-		adminClaim:     adminClaim,
+		groupsClaim:    groupsClaim,
+		adminGroup:     adminGroup,
 		serviceURLHost: serviceURLHost,
 		localAdmins:    localAdmins,
+		groupConfigs:   cfg.Groups,
 	}, nil
 }
 
@@ -453,10 +497,10 @@ func (p *Provider) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	// Build user from claims
 	user := p.buildUserFromClaims(claims)
 
-	// Check admin access
-	if !user.IsAdmin {
-		log.Printf("User %s (%s) denied access - not an admin", user.Email, user.ID)
-		http.Error(w, "Access denied: admin privileges required", http.StatusForbidden)
+	// Check access - user must be an admin OR have at least one allowed service via group membership
+	if !user.HasAnyAccess() {
+		log.Printf("User %s (%s) denied access - not an admin and no group permissions (groups: %v)", user.Email, user.ID, user.Groups)
+		http.Error(w, "Access denied: admin privileges or group membership required", http.StatusForbidden)
 		return
 	}
 
@@ -535,7 +579,56 @@ func (p *Provider) buildUserFromClaims(claims map[string]interface{}) *User {
 	// Check for admin status
 	user.IsAdmin = p.checkAdminClaim(claims)
 
+	// Admins have global access
+	user.HasGlobalAccess = user.IsAdmin
+
+	// Compute allowed services from group memberships
+	user.AllowedServices = p.computeAllowedServices(user.Groups)
+
 	return user
+}
+
+// computeAllowedServices calculates the combined allowed services for a user based on their group memberships.
+// Services are additive across groups - a user in multiple groups gets access to all services from all their groups.
+func (p *Provider) computeAllowedServices(userGroups []string) map[string][]string {
+	if p.groupConfigs == nil || len(p.groupConfigs) == 0 {
+		return nil
+	}
+
+	// Use a map of sets for deduplication
+	hostServices := make(map[string]map[string]bool)
+
+	for _, userGroup := range userGroups {
+		groupConfig, ok := p.groupConfigs[userGroup]
+		if !ok || groupConfig == nil || groupConfig.Services == nil {
+			continue
+		}
+
+		for host, services := range groupConfig.Services {
+			if hostServices[host] == nil {
+				hostServices[host] = make(map[string]bool)
+			}
+			for _, svc := range services {
+				hostServices[host][svc] = true
+			}
+		}
+	}
+
+	if len(hostServices) == 0 {
+		return nil
+	}
+
+	// Convert map of sets to map of slices
+	result := make(map[string][]string)
+	for host, svcSet := range hostServices {
+		services := make([]string, 0, len(svcSet))
+		for svc := range svcSet {
+			services = append(services, svc)
+		}
+		result[host] = services
+	}
+
+	return result
 }
 
 // checkAdminClaim determines if the user has admin privileges.
@@ -545,8 +638,8 @@ func (p *Provider) checkAdminClaim(claims map[string]interface{}) bool {
 		return true
 	}
 
-	// Check the configured admin claim
-	claimValue, ok := claims[p.adminClaim]
+	// Check the configured groups claim for the admin group
+	claimValue, ok := claims[p.groupsClaim]
 	if !ok {
 		return false
 	}
@@ -556,14 +649,13 @@ func (p *Provider) checkAdminClaim(claims map[string]interface{}) bool {
 	case bool:
 		return v
 	case string:
-		// Check if the string value indicates admin
-		lower := strings.ToLower(v)
-		return lower == "admin" || lower == "true" || lower == "1"
+		// Check if the string value matches the admin group
+		return strings.EqualFold(v, p.adminGroup)
 	case []interface{}:
-		// Check if "admin" is in the array (typical for groups claim)
+		// Check if the admin group is in the array (typical for groups claim)
 		for _, item := range v {
 			if str, ok := item.(string); ok {
-				if strings.EqualFold(str, "admin") {
+				if strings.EqualFold(str, p.adminGroup) {
 					return true
 				}
 			}
@@ -710,11 +802,12 @@ func (p *Provider) handleLocalAuth(w http.ResponseWriter, r *http.Request, next 
 	}
 
 	user := &User{
-		ID:      "local:" + username,
-		Name:    username,
-		Email:   username + "@localhost",
-		Groups:  []string{"local", "admin"},
-		IsAdmin: true,
+		ID:              "local:" + username,
+		Name:            username,
+		Email:           username + "@localhost",
+		Groups:          []string{"local", "admin"},
+		IsAdmin:         true,
+		HasGlobalAccess: true, // Local admins always have global access
 	}
 
 	session := &Session{

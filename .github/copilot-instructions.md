@@ -76,8 +76,8 @@ home_server_dashboard/
 ### `auth` Package
 - **Purpose:** OIDC authentication and session management
 - **Key Types:**
-  - `Provider` — OIDC authentication provider with session store
-  - `User` — Authenticated user information (ID, Email, Name, Groups, IsAdmin)
+  - `Provider` — OIDC authentication provider with session store and group configurations
+  - `User` — Authenticated user information (ID, Email, Name, Groups, IsAdmin, HasGlobalAccess, AllowedServices)
   - `Session` — User session with expiry
   - `SessionStore` — Thread-safe in-memory session storage
   - `StateStore` — OIDC state token management
@@ -89,25 +89,30 @@ home_server_dashboard/
   - `LogoutHandler` — Clears session and redirects to login
   - `StatusHandler` — Returns JSON with auth status
   - `GetUserFromContext(ctx)` — Retrieves authenticated user from request context
+- **User Methods:**
+  - `CanAccessService(host, serviceName)` — Checks if user can access a specific service
+  - `HasAnyAccess()` — Returns true if user has global access or any allowed services
 - **Features:**
   - OIDC discovery via `.well-known/openid-configuration`
   - Secure session cookies (HttpOnly, SameSite)
   - Admin claim checking (configurable, defaults to "groups" containing "admin")
+  - **Group-based access control:** OIDC groups can grant access to specific services on specific hosts
+  - **Additive permissions:** Users in multiple groups get combined permissions from all groups
   - Automatic session cleanup
-  - **Local access detection:** If Host header differs from `service_url`, uses Basic Auth against `local.admins` list
+  - **Local access detection:** If Host header differs from `service_url`, uses Basic Auth against `local.admins` list (with global access)
 - **Files:** `auth/auth.go`, `auth/auth_test.go`
 
 ### `handlers` Package
 - **Purpose:** HTTP request handlers for all API endpoints
 - **Key Functions:**
-  - `ServicesHandler` — Returns JSON array of all services
-  - `DockerLogsHandler` — SSE stream for Docker container logs
-  - `SystemdLogsHandler` — SSE stream for systemd unit logs
+  - `ServicesHandler` — Returns JSON array of services (filtered by user permissions)
+  - `DockerLogsHandler` — SSE stream for Docker container logs (checks permissions)
+  - `SystemdLogsHandler` — SSE stream for systemd unit logs (checks permissions)
   - `IndexHandler` — Serves the main dashboard page
-  - `ServiceActionHandler` — Handles start/stop/restart actions with SSE status updates
+  - `ServiceActionHandler` — Handles start/stop/restart actions with SSE status updates (checks permissions)
 - **Key Types:**
   - `ServiceActionRequest` — Request body for service control actions
-- **Internal:** `getAllServices()` aggregates services from all providers
+- **Internal:** `getAllServices()` aggregates services from all providers, `filterServicesForUser()` applies permission filtering
 
 ### `server` Package
 - **Purpose:** HTTP server configuration and routing
@@ -120,7 +125,8 @@ home_server_dashboard/
 - **Purpose:** Shared configuration loading from `services.json`
 - **Key Types:**
   - `HostConfig` — Single host configuration with helper methods like `IsLocal()`, `GetPrivateIP()`
-  - `OIDCConfig` — OIDC authentication settings (ServiceURL, Callback, ConfigURL, ClientID, ClientSecret, AdminClaim)
+  - `OIDCConfig` — OIDC authentication settings (ServiceURL, Callback, ConfigURL, ClientID, ClientSecret, GroupsClaim, AdminGroup, Groups)
+  - `OIDCGroupConfig` — Group-based access control configuration (Services map)
   - `LocalConfig` — Local authentication settings (Admins)
   - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`, `IsOIDCEnabled()`
 - **Functions:** `Load()`, `Get()`, `Default()`, `isPrivateIP()`
@@ -225,13 +231,59 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
     "config_url": "https://auth.example.com/.well-known/openid-configuration",
     "client_id": "your-client-id",
     "client_secret": "your-client-secret",
-    "admin_claim": "groups"             // Optional: claim to check for "admin" (default: "groups")
+    "groups_claim": "groups",           // Optional: claim containing user groups (default: "groups")
+    "admin_group": "admin",             // Optional: group name that grants admin access (default: "admin")
+    "groups": {                         // Optional: group-based access control (OIDC only)
+      "poweruser": {                    // OIDC group name
+        "services": {                   // Services this group can access
+          "nas": ["docker.service", "audiobookshelf", "traefik"],
+          "anotherhost": ["ollama.service"]
+        }
+      },
+      "bookreader": {
+        "services": {
+          "nas": ["audiobookshelf"]
+        }
+      }
+    }
   },
   "local": {                            // Optional: Local authentication
-    "admins": "user1,user2"             // Comma-separated usernames for local access
+    "admins": "user1,user2"             // Comma-separated usernames for local access (always have global access)
   }
 }
 ```
+
+### OIDC Group-Based Access Control
+
+Group filtering applies **only to OIDC authentication** (not local/PAM users). It allows non-admin users to access a subset of services based on their OIDC group memberships.
+
+**How it works:**
+1. When a user logs in via OIDC, their group claims are extracted from the ID token
+2. Each group the user belongs to is checked against the `oidc.groups` configuration
+3. If a matching group is found, the user gains access to the services listed for that group
+4. Permissions are **additive** — users in multiple groups get access to all services from all their groups (deduplicated)
+5. Users with the configured `admin_group` (default: "admin") in their `groups_claim` have **global access** to all services
+6. Local/PAM users always have **global access** regardless of group configuration
+
+**Configuration:**
+```json
+"oidc": {
+  // ... other OIDC settings ...
+  "groups": {
+    "<oidc-group-name>": {
+      "services": {
+        "<host-name>": ["<service1>", "<service2>", ...]
+      }
+    }
+  }
+}
+```
+
+- `<oidc-group-name>`: Must exactly match the group name from the OIDC provider's groups claim
+- `<host-name>`: Must match a host's `name` field in the `hosts` array
+- Services can be Docker service names (e.g., `audiobookshelf`) or systemd unit names (e.g., `docker.service`)
+
+**Example:** A user in both `poweruser` and `bookreader` groups would have access to: `docker.service`, `audiobookshelf`, `traefik` on `nas`, and `ollama.service` on `anotherhost`.
 
 ## Backend
 

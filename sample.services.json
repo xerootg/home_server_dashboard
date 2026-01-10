@@ -37,34 +37,35 @@
     "config_url": "https://authentik.somehost/application/o/nas/.well-known/openid-configuration",
     "client_id": "someId",
     "client_secret": "someSecret",
-    "admin_claim": "groups" // Optional: claim to check for "admin" (default: "groups")
+    // "groups_claim": "groups",  // Optional: claim name where groups are found (default: "groups")
+    // "admin_group": "admin",    // Optional: group name that grants global access (default: "admin")
+    "groups": {
+      "poweruser": {
+        "services": {
+          "nas": [
+            "docker.service",
+            "authentik",
+            "audiobookshelf",
+            "chrome"
+          ],
+          "anotherhost": [
+            "docker.service",
+            "ollama.service"
+          ]
+        }
+      },
+      "bookreader": {
+        "services": {
+          "nas": [
+            "docker.service",
+            "traefik",
+            "audiobookshelf"
+          ]
+        }
+      }
+    }
   },
   "local": {
     "admins": "xero"
-  },
-  "groups": {
-    "poweruser": {
-      "services": {
-        "nas": [
-          "docker.service",
-          "authentik",
-          "audiobookshelf",
-          "chrome"
-        ],
-        "anotherhost": [
-          "docker.service",
-          "ollama.service"
-        ]
-      }
-    },
-    "bookreader": {
-      "services": {
-        "nas": [
-          "docker.service",
-          "traefik",
-          "audiobookshelf"
-        ]
-      }
-    }
   }
 }

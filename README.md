@@ -143,7 +143,8 @@ For external access through a reverse proxy, configure OIDC to authenticate user
     "config_url": "https://auth.example.com/application/o/myapp/.well-known/openid-configuration",
     "client_id": "your-client-id",
     "client_secret": "your-client-secret",
-    "admin_claim": "groups"
+    "groups_claim": "groups",
+    "admin_group": "admin"
   }
 }
 ```
@@ -155,9 +156,44 @@ For external access through a reverse proxy, configure OIDC to authenticate user
 | `config_url` | OIDC discovery endpoint URL |
 | `client_id` | OAuth2 client ID from your identity provider |
 | `client_secret` | OAuth2 client secret |
-| `admin_claim` | Claim to check for admin access (default: `groups`) |
+| `groups_claim` | Claim containing user groups (default: `groups`) |
+| `admin_group` | Group name that grants full access (default: `admin`) |
 
-Users must have "admin" in their configured claim (e.g., be a member of an "admin" group) to access the dashboard.
+Users must belong to the configured `admin_group` to have full access to all services.
+
+#### OIDC Group-Based Access Control
+
+For non-admin users, you can grant access to specific services based on OIDC group membership. This allows users to view and control only the services they're authorized for.
+
+```json
+{
+  "oidc": {
+    "service_url": "https://dashboard.example.com",
+    "config_url": "https://auth.example.com/.well-known/openid-configuration",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret",
+    "groups": {
+      "media-team": {
+        "services": {
+          "nas": ["plex", "jellyfin", "audiobookshelf"]
+        }
+      },
+      "devops": {
+        "services": {
+          "nas": ["docker.service", "traefik"],
+          "webserver": ["nginx.service"]
+        }
+      }
+    }
+  }
+}
+```
+
+- Each key under `groups` must match an OIDC group name exactly
+- `services` maps host names to arrays of service names (Docker services or systemd units)
+- Permissions are **additive**: users in multiple groups get combined access from all groups
+- Users in the `admin_group` always have full access regardless of group configuration
+- Group filtering applies **only to OIDC users**; local/PAM users always have full access
 
 ### Local Authentication
 

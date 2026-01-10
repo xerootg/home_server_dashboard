@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"home_server_dashboard/config"
 )
 
 func TestSessionStore(t *testing.T) {
@@ -91,7 +93,8 @@ func TestStateStore(t *testing.T) {
 func TestCheckAdminClaim(t *testing.T) {
 	// Create a minimal provider for testing
 	p := &Provider{
-		adminClaim: "groups",
+		groupsClaim: "groups",
+		adminGroup:  "admin",
 	}
 
 	tests := []struct {
@@ -167,7 +170,8 @@ func TestCheckAdminClaim(t *testing.T) {
 
 func TestBuildUserFromClaims(t *testing.T) {
 	p := &Provider{
-		adminClaim: "groups",
+		groupsClaim: "groups",
+		adminGroup:  "admin",
 	}
 
 	claims := map[string]interface{}{
@@ -199,7 +203,8 @@ func TestBuildUserFromClaims(t *testing.T) {
 
 func TestBuildUserFromClaims_FallbackToPreferredUsername(t *testing.T) {
 	p := &Provider{
-		adminClaim: "groups",
+		groupsClaim: "groups",
+		adminGroup:  "admin",
 	}
 
 	claims := map[string]interface{}{
@@ -297,10 +302,11 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
-func TestCustomAdminClaim(t *testing.T) {
-	// Test with a custom admin claim name
+func TestCustomGroupsClaimAndAdminGroup(t *testing.T) {
+	// Test with custom groups claim name and admin group name
 	p := &Provider{
-		adminClaim: "is_admin",
+		groupsClaim: "roles",     // Custom claim name
+		adminGroup:  "superuser", // Custom admin group name
 	}
 
 	tests := []struct {
@@ -309,32 +315,46 @@ func TestCustomAdminClaim(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "custom claim true",
+			name: "custom claim with matching admin group",
 			claims: map[string]interface{}{
-				"is_admin": true,
+				"roles": []interface{}{"superuser", "developers"},
 			},
 			expected: true,
 		},
 		{
-			name: "custom claim false",
+			name: "custom claim without matching admin group",
 			claims: map[string]interface{}{
-				"is_admin": false,
+				"roles": []interface{}{"admin", "developers"}, // "admin" doesn't match "superuser"
 			},
 			expected: false,
 		},
 		{
-			name: "custom claim string 'true'",
+			name: "custom claim as string matches admin group",
 			claims: map[string]interface{}{
-				"is_admin": "true",
+				"roles": "superuser",
 			},
 			expected: true,
 		},
 		{
-			name: "groups doesn't work with custom claim",
+			name: "default groups claim doesn't work with custom claim name",
 			claims: map[string]interface{}{
-				"groups": []interface{}{"admin"},
+				"groups": []interface{}{"superuser"},
 			},
 			expected: false,
+		},
+		{
+			name: "direct admin boolean still works",
+			claims: map[string]interface{}{
+				"admin": true,
+			},
+			expected: true,
+		},
+		{
+			name: "custom claim boolean true",
+			claims: map[string]interface{}{
+				"roles": true,
+			},
+			expected: true,
 		},
 	}
 
@@ -474,4 +494,367 @@ func trimSpace(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+func TestUser_CanAccessService(t *testing.T) {
+	tests := []struct {
+		name        string
+		user        *User
+		host        string
+		serviceName string
+		expected    bool
+	}{
+		{
+			name: "global access allows any service",
+			user: &User{
+				HasGlobalAccess: true,
+			},
+			host:        "nas",
+			serviceName: "docker.service",
+			expected:    true,
+		},
+		{
+			name: "allowed service on allowed host",
+			user: &User{
+				AllowedServices: map[string][]string{
+					"nas": {"docker.service", "audiobookshelf"},
+				},
+			},
+			host:        "nas",
+			serviceName: "audiobookshelf",
+			expected:    true,
+		},
+		{
+			name: "service not in allowed list",
+			user: &User{
+				AllowedServices: map[string][]string{
+					"nas": {"docker.service"},
+				},
+			},
+			host:        "nas",
+			serviceName: "audiobookshelf",
+			expected:    false,
+		},
+		{
+			name: "host not in allowed list",
+			user: &User{
+				AllowedServices: map[string][]string{
+					"nas": {"docker.service"},
+				},
+			},
+			host:        "otherhost",
+			serviceName: "docker.service",
+			expected:    false,
+		},
+		{
+			name: "nil allowed services",
+			user: &User{
+				AllowedServices: nil,
+			},
+			host:        "nas",
+			serviceName: "docker.service",
+			expected:    false,
+		},
+		{
+			name: "empty allowed services",
+			user: &User{
+				AllowedServices: map[string][]string{},
+			},
+			host:        "nas",
+			serviceName: "docker.service",
+			expected:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.user.CanAccessService(tt.host, tt.serviceName)
+			if result != tt.expected {
+				t.Errorf("CanAccessService(%q, %q) = %v, want %v",
+					tt.host, tt.serviceName, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestUser_HasAnyAccess(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     *User
+		expected bool
+	}{
+		{
+			name: "global access returns true",
+			user: &User{
+				HasGlobalAccess: true,
+			},
+			expected: true,
+		},
+		{
+			name: "has allowed services returns true",
+			user: &User{
+				AllowedServices: map[string][]string{
+					"nas": {"docker.service"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "empty allowed services returns false",
+			user: &User{
+				AllowedServices: map[string][]string{},
+			},
+			expected: false,
+		},
+		{
+			name: "nil allowed services returns false",
+			user: &User{
+				AllowedServices: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "empty host list returns false",
+			user: &User{
+				AllowedServices: map[string][]string{
+					"nas": {},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.user.HasAnyAccess()
+			if result != tt.expected {
+				t.Errorf("HasAnyAccess() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestProvider_ComputeAllowedServices(t *testing.T) {
+	tests := []struct {
+		name         string
+		groupConfigs map[string]*config.OIDCGroupConfig
+		userGroups   []string
+		expected     map[string][]string
+	}{
+		{
+			name:         "nil group configs",
+			groupConfigs: nil,
+			userGroups:   []string{"poweruser"},
+			expected:     nil,
+		},
+		{
+			name:         "empty group configs",
+			groupConfigs: map[string]*config.OIDCGroupConfig{},
+			userGroups:   []string{"poweruser"},
+			expected:     nil,
+		},
+		{
+			name: "user not in any configured group",
+			groupConfigs: map[string]*config.OIDCGroupConfig{
+				"poweruser": {
+					Services: map[string][]string{
+						"nas": {"docker.service"},
+					},
+				},
+			},
+			userGroups: []string{"developers"},
+			expected:   nil,
+		},
+		{
+			name: "single group membership",
+			groupConfigs: map[string]*config.OIDCGroupConfig{
+				"poweruser": {
+					Services: map[string][]string{
+						"nas": {"docker.service", "audiobookshelf"},
+					},
+				},
+			},
+			userGroups: []string{"poweruser"},
+			expected: map[string][]string{
+				"nas": {"docker.service", "audiobookshelf"},
+			},
+		},
+		{
+			name: "multiple group membership - additive",
+			groupConfigs: map[string]*config.OIDCGroupConfig{
+				"poweruser": {
+					Services: map[string][]string{
+						"nas": {"docker.service", "audiobookshelf"},
+					},
+				},
+				"bookreader": {
+					Services: map[string][]string{
+						"nas": {"traefik", "audiobookshelf"},
+					},
+				},
+			},
+			userGroups: []string{"poweruser", "bookreader"},
+			expected: map[string][]string{
+				"nas": {"docker.service", "audiobookshelf", "traefik"},
+			},
+		},
+		{
+			name: "multiple hosts",
+			groupConfigs: map[string]*config.OIDCGroupConfig{
+				"poweruser": {
+					Services: map[string][]string{
+						"nas":         {"docker.service"},
+						"anotherhost": {"ollama.service"},
+					},
+				},
+			},
+			userGroups: []string{"poweruser"},
+			expected: map[string][]string{
+				"nas":         {"docker.service"},
+				"anotherhost": {"ollama.service"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{
+				groupConfigs: tt.groupConfigs,
+			}
+
+			result := p.computeAllowedServices(tt.userGroups)
+
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("Expected nil, got %v", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Errorf("Expected %v, got nil", tt.expected)
+				return
+			}
+
+			// Check each host
+			for host, expectedServices := range tt.expected {
+				resultServices, ok := result[host]
+				if !ok {
+					t.Errorf("Missing host %q in result", host)
+					continue
+				}
+
+				// Convert to sets for comparison (order doesn't matter)
+				expectedSet := make(map[string]bool)
+				for _, svc := range expectedServices {
+					expectedSet[svc] = true
+				}
+
+				resultSet := make(map[string]bool)
+				for _, svc := range resultServices {
+					resultSet[svc] = true
+				}
+
+				for svc := range expectedSet {
+					if !resultSet[svc] {
+						t.Errorf("Host %q: missing expected service %q", host, svc)
+					}
+				}
+
+				for svc := range resultSet {
+					if !expectedSet[svc] {
+						t.Errorf("Host %q: unexpected service %q", host, svc)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestBuildUserFromClaims_WithGroupConfig(t *testing.T) {
+	p := &Provider{
+		groupsClaim: "groups",
+		adminGroup:  "admin",
+		groupConfigs: map[string]*config.OIDCGroupConfig{
+			"poweruser": {
+				Services: map[string][]string{
+					"nas": {"docker.service", "audiobookshelf"},
+				},
+			},
+		},
+	}
+
+	// Non-admin user with group membership
+	claims := map[string]interface{}{
+		"sub":    "user-uuid-456",
+		"email":  "user@example.com",
+		"name":   "Regular User",
+		"groups": []interface{}{"poweruser"},
+	}
+
+	user := p.buildUserFromClaims(claims)
+
+	if user.IsAdmin {
+		t.Error("Expected user to not be admin")
+	}
+
+	if user.HasGlobalAccess {
+		t.Error("Expected user to not have global access")
+	}
+
+	if !user.CanAccessService("nas", "docker.service") {
+		t.Error("Expected user to have access to docker.service on nas")
+	}
+
+	if !user.CanAccessService("nas", "audiobookshelf") {
+		t.Error("Expected user to have access to audiobookshelf on nas")
+	}
+
+	if user.CanAccessService("nas", "traefik") {
+		t.Error("Expected user to NOT have access to traefik on nas")
+	}
+
+	if !user.HasAnyAccess() {
+		t.Error("Expected user to have some access")
+	}
+}
+
+func TestBuildUserFromClaims_AdminHasGlobalAccess(t *testing.T) {
+	p := &Provider{
+		groupsClaim: "groups",
+		adminGroup:  "admin",
+		groupConfigs: map[string]*config.OIDCGroupConfig{
+			"poweruser": {
+				Services: map[string][]string{
+					"nas": {"docker.service"},
+				},
+			},
+		},
+	}
+
+	claims := map[string]interface{}{
+		"sub":    "admin-uuid",
+		"email":  "admin@example.com",
+		"name":   "Admin User",
+		"groups": []interface{}{"admin", "poweruser"},
+	}
+
+	user := p.buildUserFromClaims(claims)
+
+	if !user.IsAdmin {
+		t.Error("Expected user to be admin")
+	}
+
+	if !user.HasGlobalAccess {
+		t.Error("Expected admin to have global access")
+	}
+
+	// Admin should have access to any service, even ones not in group config
+	if !user.CanAccessService("nas", "traefik") {
+		t.Error("Expected admin to have access to traefik on nas")
+	}
+
+	if !user.CanAccessService("otherhost", "anything.service") {
+		t.Error("Expected admin to have access to any service on any host")
+	}
 }

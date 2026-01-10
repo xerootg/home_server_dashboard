@@ -471,7 +471,7 @@ function toggleLogs(row) {
     if (source === 'systemd') {
         url = '/api/logs/systemd?unit=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
     } else {
-        url = '/api/logs?container=' + encodeURIComponent(containerName);
+        url = '/api/logs?container=' + encodeURIComponent(containerName) + '&service=' + encodeURIComponent(serviceName);
     }
 
     eventSource = new EventSource(url);

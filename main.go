@@ -89,6 +89,9 @@ func main() {
 
 	log.Printf("Loaded config from %s with %d hosts", configPath, len(cfg.Hosts))
 
+	// Validate group configurations (log warnings for non-existent services)
+	cfg.ValidateGroupConfigs()
+
 	// Create server config with embedded filesystems
 	serverCfg := server.DefaultConfig()
 	staticFS, err := getStaticFS()

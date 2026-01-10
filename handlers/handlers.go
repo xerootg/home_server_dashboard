@@ -20,6 +20,7 @@ import (
 	"github.com/gomarkdown/markdown/html"
 	"github.com/gomarkdown/markdown/parser"
 
+	"home_server_dashboard/auth"
 	"home_server_dashboard/config"
 	"home_server_dashboard/query"
 	"home_server_dashboard/services"
@@ -233,6 +234,23 @@ func enrichWithTraefikURLs(ctx context.Context, cfg *config.Config, svcList []se
 	return svcList
 }
 
+// filterServicesForUser returns only the services the user is allowed to access.
+func filterServicesForUser(svcList []services.ServiceInfo, user *auth.User) []services.ServiceInfo {
+	// If user has global access, return all services
+	if user == nil || user.HasGlobalAccess {
+		return svcList
+	}
+
+	// Filter services based on user's allowed services
+	var filtered []services.ServiceInfo
+	for _, svc := range svcList {
+		if user.CanAccessService(svc.Host, svc.Name) {
+			filtered = append(filtered, svc)
+		}
+	}
+	return filtered
+}
+
 // ServicesHandler handles GET /api/services requests.
 func ServicesHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
@@ -247,6 +265,10 @@ func ServicesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Filter services based on user permissions
+	user := auth.GetUserFromContext(r.Context())
+	svcList = filterServicesForUser(svcList, user)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(svcList)
 }
@@ -257,6 +279,13 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 	hostName := r.URL.Query().Get("host")
 	if unitName == "" {
 		http.Error(w, "unit parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Check user permissions
+	user := auth.GetUserFromContext(r.Context())
+	if user != nil && !user.CanAccessService(hostName, unitName) {
+		http.Error(w, "Access denied: you do not have permission to view logs for this service", http.StatusForbidden)
 		return
 	}
 
@@ -324,8 +353,26 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 // DockerLogsHandler handles GET /api/logs requests for streaming Docker container logs.
 func DockerLogsHandler(w http.ResponseWriter, r *http.Request) {
 	containerName := r.URL.Query().Get("container")
+	serviceName := r.URL.Query().Get("service")
 	if containerName == "" {
 		http.Error(w, "container parameter required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := config.Get()
+	localHostName := "localhost"
+	if cfg != nil {
+		localHostName = cfg.GetLocalHostName()
+	}
+
+	// Check user permissions - use service name if provided, otherwise container name
+	checkName := serviceName
+	if checkName == "" {
+		checkName = containerName
+	}
+	user := auth.GetUserFromContext(r.Context())
+	if user != nil && !user.CanAccessService(localHostName, checkName) {
+		http.Error(w, "Access denied: you do not have permission to view logs for this service", http.StatusForbidden)
 		return
 	}
 
@@ -339,12 +386,6 @@ func DockerLogsHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
-	}
-
-	cfg := config.Get()
-	localHostName := "localhost"
-	if cfg != nil {
-		localHostName = cfg.GetLocalHostName()
 	}
 
 	dockerProvider, err := docker.NewProvider(localHostName)
@@ -486,6 +527,13 @@ func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check user permissions
+	user := auth.GetUserFromContext(r.Context())
+	if user != nil && !user.CanAccessService(req.Host, req.ServiceName) {
+		http.Error(w, "Access denied: you do not have permission to control this service", http.StatusForbidden)
 		return
 	}
 

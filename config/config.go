@@ -4,12 +4,20 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sync"
 
 	"github.com/tailscale/hujson"
 )
+
+// OIDCGroupConfig defines the services a group can access.
+type OIDCGroupConfig struct {
+	// Services maps host names to lists of service names the group can access.
+	// Service names can be Docker service names or systemd unit names.
+	Services map[string][]string `json:"services"`
+}
 
 // OIDCConfig holds OpenID Connect authentication settings.
 type OIDCConfig struct {
@@ -23,9 +31,14 @@ type OIDCConfig struct {
 	ClientID string `json:"client_id"`
 	// ClientSecret is the OAuth2 client secret.
 	ClientSecret string `json:"client_secret"`
-	// AdminClaim is the claim name to check for admin access (default: "groups").
-	// The claim value should contain "admin" or the user should have admin=true.
-	AdminClaim string `json:"admin_claim,omitempty"`
+	// GroupsClaim is the claim name where user groups are found (default: "groups").
+	GroupsClaim string `json:"groups_claim,omitempty"`
+	// AdminGroup is the group name that grants admin/global access (default: "admin").
+	AdminGroup string `json:"admin_group,omitempty"`
+	// Groups maps OIDC group names to their allowed services configuration.
+	// Users who are members of these groups will have access to the specified services.
+	// Group permissions are additive - a user in multiple groups gets access to all services.
+	Groups map[string]*OIDCGroupConfig `json:"groups,omitempty"`
 }
 
 // TraefikConfig holds Traefik API connection settings for a host.
@@ -219,4 +232,77 @@ func Default() *Config {
 	configMutex.Unlock()
 
 	return cfg
+}
+
+// GetAllConfiguredServices returns a set of all services configured across all hosts.
+// The returned map has keys in the format "host:service" for quick lookup.
+func (c *Config) GetAllConfiguredServices() map[string]bool {
+	services := make(map[string]bool)
+	for _, host := range c.Hosts {
+		// Add systemd services
+		for _, svc := range host.SystemdServices {
+			services[host.Name+":"+svc] = true
+		}
+		// Note: Docker services are discovered at runtime, not from config,
+		// so we can't validate them at startup. Those will be checked at runtime.
+	}
+	return services
+}
+
+// ValidateGroupConfigs checks if services referenced in group configs exist in the host config.
+// It logs warnings for any services that are referenced but not found.
+// Note: This only validates systemd services since Docker services are runtime-discovered.
+// Docker service validation happens at runtime when services are filtered.
+func (c *Config) ValidateGroupConfigs() {
+	if c.OIDC == nil || c.OIDC.Groups == nil {
+		return
+	}
+
+	configuredServices := c.GetAllConfiguredServices()
+
+	// Track hosts that exist
+	validHosts := make(map[string]bool)
+	for _, host := range c.Hosts {
+		validHosts[host.Name] = true
+	}
+
+	for groupName, groupConfig := range c.OIDC.Groups {
+		if groupConfig == nil || groupConfig.Services == nil {
+			continue
+		}
+
+		for hostName, services := range groupConfig.Services {
+			// Check if host exists
+			if !validHosts[hostName] {
+				log.Printf("Warning: OIDC group '%s' references non-existent host '%s'", groupName, hostName)
+				continue
+			}
+
+			for _, svcName := range services {
+				key := hostName + ":" + svcName
+				// Only warn for systemd services (which are in config)
+				// Docker services might be valid but we can't check until runtime
+				if !configuredServices[key] {
+					// Check if it might be a Docker service (not ending in .service or .timer)
+					if !isSystemdUnit(svcName) {
+						// Could be a Docker service, which we can't validate at startup
+						continue
+					}
+					log.Printf("Warning: OIDC group '%s' references non-existent systemd service '%s' on host '%s'",
+						groupName, svcName, hostName)
+				}
+			}
+		}
+	}
+}
+
+// isSystemdUnit checks if a service name looks like a systemd unit.
+func isSystemdUnit(name string) bool {
+	suffixes := []string{".service", ".timer", ".socket", ".mount", ".target", ".path", ".scope", ".slice"}
+	for _, suffix := range suffixes {
+		if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
+			return true
+		}
+	}
+	return false
 }

@@ -509,7 +509,8 @@ func TestLoad_OIDCConfig(t *testing.T) {
 				"config_url": "https://auth.example.com/.well-known/openid-configuration",
 				"client_id": "myclient",
 				"client_secret": "mysecret",
-				"admin_claim": "roles"
+				"groups_claim": "roles",
+				"admin_group": "superadmin"
 			}
 		}`
 
@@ -542,8 +543,11 @@ func TestLoad_OIDCConfig(t *testing.T) {
 		if cfg.OIDC.ClientSecret != "mysecret" {
 			t.Errorf("OIDC.ClientSecret = %v, want mysecret", cfg.OIDC.ClientSecret)
 		}
-		if cfg.OIDC.AdminClaim != "roles" {
-			t.Errorf("OIDC.AdminClaim = %v, want roles", cfg.OIDC.AdminClaim)
+		if cfg.OIDC.GroupsClaim != "roles" {
+			t.Errorf("OIDC.GroupsClaim = %v, want roles", cfg.OIDC.GroupsClaim)
+		}
+		if cfg.OIDC.AdminGroup != "superadmin" {
+			t.Errorf("OIDC.AdminGroup = %v, want superadmin", cfg.OIDC.AdminGroup)
 		}
 
 		if !cfg.IsOIDCEnabled() {
@@ -582,4 +586,137 @@ func TestLoad_OIDCConfig(t *testing.T) {
 			t.Error("Expected IsOIDCEnabled() to return false")
 		}
 	})
+}
+
+func TestConfig_GetAllConfiguredServices(t *testing.T) {
+	cfg := &Config{
+		Hosts: []HostConfig{
+			{
+				Name:            "nas",
+				Address:         "localhost",
+				SystemdServices: []string{"docker.service", "ssh.service"},
+			},
+			{
+				Name:            "server2",
+				Address:         "192.168.1.100",
+				SystemdServices: []string{"ollama.service"},
+			},
+		},
+	}
+
+	services := cfg.GetAllConfiguredServices()
+
+	expected := map[string]bool{
+		"nas:docker.service":    true,
+		"nas:ssh.service":       true,
+		"server2:ollama.service": true,
+	}
+
+	if len(services) != len(expected) {
+		t.Errorf("Expected %d services, got %d", len(expected), len(services))
+	}
+
+	for key := range expected {
+		if !services[key] {
+			t.Errorf("Missing expected service: %s", key)
+		}
+	}
+}
+
+func TestIsSystemdUnit(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"service unit", "docker.service", true},
+		{"timer unit", "backup.timer", true},
+		{"socket unit", "docker.socket", true},
+		{"mount unit", "home.mount", true},
+		{"target unit", "multi-user.target", true},
+		{"docker service name", "audiobookshelf", false},
+		{"docker service with hyphen", "my-app", false},
+		{"empty string", "", false},
+		{"just suffix", ".service", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSystemdUnit(tt.input)
+			if result != tt.expected {
+				t.Errorf("isSystemdUnit(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestOIDCGroupConfig_Parsing(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "group_config.json")
+
+	jsonContent := `{
+		"hosts": [
+			{
+				"name": "nas",
+				"address": "localhost",
+				"systemd_services": ["docker.service"],
+				"docker_compose_roots": []
+			}
+		],
+		"oidc": {
+			"service_url": "https://dash.example.com",
+			"callback": "/oidc/callback",
+			"config_url": "https://auth.example.com/.well-known/openid-configuration",
+			"client_id": "test-client",
+			"client_secret": "test-secret",
+			"groups": {
+				"poweruser": {
+					"services": {
+						"nas": ["docker.service", "audiobookshelf"]
+					}
+				},
+				"bookreader": {
+					"services": {
+						"nas": ["traefik", "audiobookshelf"]
+					}
+				}
+			}
+		}
+	}`
+
+	err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.OIDC == nil {
+		t.Fatal("Expected OIDC config to be present")
+	}
+
+	if cfg.OIDC.Groups == nil {
+		t.Fatal("Expected OIDC groups to be present")
+	}
+
+	if len(cfg.OIDC.Groups) != 2 {
+		t.Errorf("Expected 2 groups, got %d", len(cfg.OIDC.Groups))
+	}
+
+	poweruser := cfg.OIDC.Groups["poweruser"]
+	if poweruser == nil {
+		t.Fatal("Expected poweruser group to be present")
+	}
+
+	if poweruser.Services == nil {
+		t.Fatal("Expected poweruser services to be present")
+	}
+
+	nasServices := poweruser.Services["nas"]
+	if len(nasServices) != 2 {
+		t.Errorf("Expected 2 services for nas, got %d", len(nasServices))
+	}
 }
