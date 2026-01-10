@@ -46,8 +46,18 @@ cp sample.services.json services.json
 3. Build and run:
 
 ```bash
-go run .
-# or
+# Install npm dependencies and build frontend (required once)
+npm install
+npm run build
+
+# Then build and run Go binary
+go build -o nas-dashboard && ./nas-dashboard
+```
+
+Alternatively, use `go generate` to run both npm commands automatically:
+
+```bash
+go generate ./...
 go build -o nas-dashboard && ./nas-dashboard
 ```
 
@@ -105,6 +115,42 @@ To display Traefik-exposed hostnames as clickable links next to services, enable
 ```
 
 The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
+
+### Gotify Push Notifications
+
+The dashboard can send push notifications via [Gotify](https://gotify.net/) when services change state or hosts become unreachable. This is useful for getting alerted when a service goes down.
+
+```json
+{
+  "gotify": {
+    "enabled": true,
+    "hostname": "https://gotify.example.com",
+    "token": "your-app-token"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable or disable Gotify notifications |
+| `hostname` | URL of your Gotify server |
+| `token` | Application token from Gotify (create an app in Gotify's web UI) |
+
+**Events that trigger notifications:**
+
+| Event | Priority | Description |
+|-------|----------|-------------|
+| Service started | Normal (5) | 🟢 Service went from stopped to running |
+| Service stopped | High (8) | 🔴 Service went from running to stopped |
+| Host unreachable | Max (10) | 🚨 Cannot connect to a configured host |
+| Host recovered | High (8) | ✅ Previously unreachable host is now reachable |
+
+The monitor uses native event sources for efficient real-time detection:
+- **Docker**: Uses the Docker Events API to receive container state changes instantly
+- **Local systemd**: Uses D-Bus signals for immediate unit state notifications
+- **Remote systemd**: Falls back to polling (every 60 seconds) since native events aren't available over SSH
+
+**Note:** On startup, the monitor captures the current state of all services without sending notifications, so you won't receive a flood of alerts when the dashboard restarts.
 
 ### Docker Labels
 

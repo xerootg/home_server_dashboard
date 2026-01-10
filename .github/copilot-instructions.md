@@ -25,6 +25,18 @@ home_server_dashboard/
 ├── config/
 │   ├── config.go                  # Shared configuration loading and types
 │   └── config_test.go             # Config loading and helper tests
+├── events/
+│   ├── events.go                  # Event types and event bus for pub/sub
+│   └── events_test.go             # Event bus unit tests
+├── monitor/
+│   ├── monitor.go                 # Service state monitoring with polling
+│   └── monitor_test.go            # Monitor unit tests
+├── notifiers/
+│   ├── notifier.go                # Notifier interface and manager
+│   ├── notifier_test.go           # Notifier manager tests
+│   └── gotify/
+│       ├── gotify.go              # Gotify notification implementation
+│       └── gotify_test.go         # Gotify notifier tests
 ├── query/
 │   ├── query.go                   # Bang & Pipe expression compiler (types, Compile)
 │   ├── lexer.go                   # Tokenizer for expression parsing
@@ -94,7 +106,9 @@ home_server_dashboard/
 - **Responsibilities:**
   - Load configuration from `services.json`
   - Initialize OIDC authentication provider (if configured)
+  - Initialize event bus, monitor, and notifiers
   - Create and start HTTP server
+  - Handle graceful shutdown
 - **Files:** `main.go`, `main_test.go`
 
 ### `auth` Package
@@ -152,8 +166,85 @@ home_server_dashboard/
   - `OIDCConfig` — OIDC authentication settings (ServiceURL, Callback, ConfigURL, ClientID, ClientSecret, GroupsClaim, AdminGroup, Groups)
   - `OIDCGroupConfig` — Group-based access control configuration (Services map)
   - `LocalConfig` — Local authentication settings (Admins)
+  - `GotifyConfig` — Gotify notification settings (Enabled, Hostname, Token)
   - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`, `IsOIDCEnabled()`
 - **Functions:** `Load()`, `Get()`, `Default()`, `isPrivateIP()`
+
+### `events` Package
+- **Purpose:** Event-driven architecture for service monitoring pub/sub
+- **Key Types:**
+  - `EventType` — Enum: `ServiceStateChanged`, `HostUnreachable`, `HostRecovered`
+  - `Event` — Interface with `Type()` and `Timestamp()` methods
+  - `ServiceStateChangedEvent` — Emitted when a service changes state (running/stopped)
+  - `HostUnreachableEvent` — Emitted when a host cannot be contacted
+  - `HostRecoveredEvent` — Emitted when a previously unreachable host recovers
+  - `Bus` — Thread-safe event bus for publish/subscribe
+  - `Subscription` — Subscription handle with `Unsubscribe()` method
+  - `Handler` — Function type for event handlers
+- **Key Functions:**
+  - `NewBus(asyncPublish bool)` — Creates event bus (async mode calls handlers in goroutines)
+  - `NewServiceStateChangedEvent(...)` — Creates service state change event
+  - `NewHostUnreachableEvent(host, reason)` — Creates host unreachable event
+  - `NewHostRecoveredEvent(host)` — Creates host recovered event
+- **Usage Pattern:**
+  ```go
+  bus := events.NewBus(true) // async dispatch
+  sub := bus.Subscribe(events.ServiceStateChanged, func(e events.Event) {
+      // handle event
+  })
+  bus.Publish(events.NewServiceStateChangedEvent(...))
+  sub.Unsubscribe()
+  ```
+
+### `monitor` Package
+- **Purpose:** Service state monitoring using native event sources (Docker Events API, systemd D-Bus signals)
+- **Key Types:**
+  - `Monitor` — Watches services and emits events on state changes
+  - `ServiceState` — Tracks last known state of a service
+  - `HostState` — Tracks whether a host is reachable
+  - `Option` — Functional options for configuration
+- **Key Functions:**
+  - `New(cfg, bus, opts...)` — Creates monitor with config and event bus
+  - `WithPollInterval(duration)` — Sets polling interval for remote hosts (default 60s)
+  - `WithSkipFirstEvent(bool)` — Skip events during initial discovery (default true)
+  - `Start()` — Begins background monitoring
+  - `Stop()` — Stops monitoring and waits for cleanup
+- **Features:**
+  - **Native Docker Events:** Uses Docker Events API with filters for container state changes (start/stop/die/kill/pause/unpause)
+  - **Native systemd D-Bus signals:** Uses `Subscribe()` and `SetSubStateSubscriber()` for real-time unit state changes
+  - **Remote host polling:** Falls back to polling for remote hosts (SSH-based systemd) at configurable interval
+  - Emits `ServiceStateChanged` events when service state changes
+  - Emits `HostUnreachable`/`HostRecovered` events for host connectivity
+  - Skips initial discovery to avoid startup notification spam
+  - Thread-safe state tracking
+
+### `notifiers` Package
+- **Purpose:** Notification delivery for events (extensible for multiple backends)
+- **Key Types:**
+  - `Notifier` — Interface: `Name()`, `Notify(event)`, `Close()`
+  - `Manager` — Manages multiple notifiers, routes events to all registered notifiers
+- **Key Functions:**
+  - `NewManager(bus)` — Creates manager subscribed to all event types
+  - `Register(notifier)` — Adds a notifier to receive events
+  - `Close()` — Unsubscribes from events and closes all notifiers
+- **Design:** Notifiers are best-effort; failures are logged but don't stop other notifiers
+
+### `notifiers/gotify` Package
+- **Purpose:** Gotify push notification implementation using the official Gotify API client
+- **Key Types:**
+  - `Notifier` — Implements `notifiers.Notifier` for Gotify
+  - `Message` — Internal message struct with Title, Message, Priority (used for formatting)
+- **Key Functions:**
+  - `New(cfg)` — Creates notifier from config (returns nil if disabled/invalid)
+  - `Notify(event)` — Sends notification for event
+  - `SendTest()` — Sends test notification to verify connectivity
+- **Dependencies:**
+  - `github.com/gotify/go-api-client/v2` — Official Gotify Go API client
+- **Priority Levels:**
+  - `PriorityMax (10)` — Host unreachable (persistent notification)
+  - `PriorityHigh (8)` — Service stopped, host recovered
+  - `PriorityNormal (5)` — Service started, test messages
+  - `PriorityLow (2)` — Other state changes
 
 ### `query` Package
 - **Purpose:** Compiles "Bang & Pipe" search expressions into ASTs for client-side evaluation
@@ -284,9 +375,37 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
   },
   "local": {                            // Optional: Local authentication
     "admins": "user1,user2"             // Comma-separated usernames for local access (always have global access)
+  },
+  "gotify": {                           // Optional: Gotify push notifications
+    "enabled": true,                    // Enable/disable Gotify notifications
+    "hostname": "https://gotify.example.com", // Gotify server URL
+    "token": "your-app-token"           // Application token from Gotify
   }
 }
 ```
+
+### Gotify Notifications
+
+The dashboard can send push notifications to a Gotify server when service states change or hosts become unreachable. This is **optional** — the dashboard works fine without Gotify configured.
+
+**Configuration:**
+```json
+"gotify": {
+  "enabled": true,
+  "hostname": "https://gotify.example.com",
+  "token": "your-app-token"
+}
+```
+
+**Events that trigger notifications:**
+| Event | Priority | Description |
+|-------|----------|-------------|
+| Service started | Normal (5) | 🟢 Service went from stopped to running |
+| Service stopped | High (8) | 🔴 Service went from running to stopped |
+| Host unreachable | Max (10) | 🚨 Cannot connect to a configured host |
+| Host recovered | High (8) | ✅ Previously unreachable host is now reachable |
+
+**Startup behavior:** The monitor skips event emission during initial service discovery to avoid notification spam on dashboard startup/restart.
 
 ### OIDC Group-Based Access Control
 
@@ -572,6 +691,10 @@ JavaScript tests cover the client-side functionality with modular test files:
 | handlers | ✅ | — |
 | server | ✅ | — |
 | config | ✅ | — |
+| events | ✅ | — |
+| monitor | ✅ | — |
+| notifiers | ✅ | — |
+| notifiers/gotify | ✅ | — |
 | query | ✅ | — |
 | services | ✅ | — |
 | services/docker | ✅ | ✅ |

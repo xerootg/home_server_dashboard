@@ -720,3 +720,128 @@ func TestOIDCGroupConfig_Parsing(t *testing.T) {
 		t.Errorf("Expected 2 services for nas, got %d", len(nasServices))
 	}
 }
+
+func TestGotifyConfig_IsValid(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *GotifyConfig
+		expected bool
+	}{
+		{
+			name:     "nil config",
+			config:   nil,
+			expected: false,
+		},
+		{
+			name:     "disabled config",
+			config:   &GotifyConfig{Enabled: false, Hostname: "https://gotify.example.com", Token: "token"},
+			expected: false,
+		},
+		{
+			name:     "missing hostname",
+			config:   &GotifyConfig{Enabled: true, Token: "token"},
+			expected: false,
+		},
+		{
+			name:     "missing token",
+			config:   &GotifyConfig{Enabled: true, Hostname: "https://gotify.example.com"},
+			expected: false,
+		},
+		{
+			name:     "empty config",
+			config:   &GotifyConfig{Enabled: true},
+			expected: false,
+		},
+		{
+			name:     "valid config",
+			config:   &GotifyConfig{Enabled: true, Hostname: "https://gotify.example.com", Token: "token"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.IsValid(); got != tt.expected {
+				t.Errorf("IsValid() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoad_GotifyConfig(t *testing.T) {
+	tempDir := t.TempDir()
+
+	t.Run("config with Gotify", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "gotify_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "testhost",
+					"address": "localhost",
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			],
+			"gotify": {
+				"enabled": true,
+				"hostname": "https://gotify.example.com",
+				"token": "mytoken123"
+			}
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if cfg.Gotify == nil {
+			t.Fatal("Expected Gotify config to be set")
+		}
+
+		if !cfg.Gotify.Enabled {
+			t.Error("Expected Gotify to be enabled")
+		}
+		if cfg.Gotify.Hostname != "https://gotify.example.com" {
+			t.Errorf("Gotify hostname = %v, want https://gotify.example.com", cfg.Gotify.Hostname)
+		}
+		if cfg.Gotify.Token != "mytoken123" {
+			t.Errorf("Gotify token = %v, want mytoken123", cfg.Gotify.Token)
+		}
+		if !cfg.Gotify.IsValid() {
+			t.Error("Expected Gotify config to be valid")
+		}
+	})
+
+	t.Run("config without Gotify", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "no_gotify_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "testhost",
+					"address": "localhost",
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if cfg.Gotify != nil {
+			t.Error("Expected Gotify config to be nil when not specified")
+		}
+	})
+}

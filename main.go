@@ -7,11 +7,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"os/user"
+	"syscall"
 	"time"
 
 	"home_server_dashboard/auth"
 	"home_server_dashboard/config"
+	"home_server_dashboard/events"
+	"home_server_dashboard/monitor"
+	"home_server_dashboard/notifiers"
+	"home_server_dashboard/notifiers/gotify"
 	"home_server_dashboard/polkit"
 	"home_server_dashboard/server"
 	"home_server_dashboard/sudoers"
@@ -124,8 +130,44 @@ func main() {
 		log.Printf("OIDC authentication not configured, running without authentication")
 	}
 
+	// Initialize event-driven infrastructure
+	eventBus := events.NewBus(true) // async event dispatch
+
+	// Initialize notifier manager
+	notifierMgr := notifiers.NewManager(eventBus)
+
+	// Register Gotify notifier if configured
+	if gotifyNotifier := gotify.New(cfg.Gotify); gotifyNotifier != nil {
+		notifierMgr.Register(gotifyNotifier)
+		log.Printf("Gotify notifications enabled (server: %s)", cfg.Gotify.Hostname)
+	} else {
+		log.Printf("Gotify notifications not configured")
+	}
+
+	// Initialize service monitor
+	serviceMonitor := monitor.New(cfg, eventBus)
+	serviceMonitor.Start()
+
 	// Create and start server
 	srv := server.New(serverCfg)
+
+	// Handle graceful shutdown
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+
+		log.Println("Shutting down...")
+
+		// Stop monitor first to prevent new events
+		serviceMonitor.Stop()
+
+		// Close notifier manager
+		notifierMgr.Close()
+
+		os.Exit(0)
+	}()
+
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}

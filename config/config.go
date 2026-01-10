@@ -130,11 +130,27 @@ type LocalConfig struct {
 	Admins string `json:"admins"`
 }
 
+// GotifyConfig holds Gotify notification settings.
+type GotifyConfig struct {
+	// Enabled determines whether Gotify notifications are active.
+	Enabled bool `json:"enabled"`
+	// Hostname is the Gotify server URL (e.g., "https://gotify.example.com").
+	Hostname string `json:"hostname"`
+	// Token is the application token for sending messages.
+	Token string `json:"token"`
+}
+
+// IsValid returns true if the Gotify configuration is complete and enabled.
+func (g *GotifyConfig) IsValid() bool {
+	return g != nil && g.Enabled && g.Hostname != "" && g.Token != ""
+}
+
 // Config represents the complete dashboard configuration.
 type Config struct {
-	Hosts []HostConfig `json:"hosts"`
-	OIDC  *OIDCConfig  `json:"oidc,omitempty"`
-	Local *LocalConfig `json:"local,omitempty"`
+	Hosts  []HostConfig  `json:"hosts"`
+	OIDC   *OIDCConfig   `json:"oidc,omitempty"`
+	Local  *LocalConfig  `json:"local,omitempty"`
+	Gotify *GotifyConfig `json:"gotify,omitempty"`
 }
 
 // IsOIDCEnabled returns true if OIDC authentication is configured and enabled.

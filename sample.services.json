@@ -31,6 +31,12 @@
       }
     }
   ],
+  "gotify":
+  {
+    "enabled": true,
+    "hostname": "https://gotify.something",
+    "token": "a big secret"
+  },
   "oidc": {
     "service_url": "https://dash.somehost",
     "callback": "/oidc/callback",
