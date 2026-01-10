@@ -1,34 +1,70 @@
 {
-    "hosts": [
-        {
-            "name": "nas",
-            "address": "localhost",
-            "nic": [
-                "ens10"
-            ],
-            "systemd_services": [
-                "docker.service"
-            ],
-            "docker_compose_roots": [
-                "/some/folder/"
-            ],
-            "traefik": {
-                "enabled": true,
-                "api_port": 8080
-            }
-        },
-        {
-            "name": "anotherhost",
-            "address": "192.168.1.9",
-            "systemd_services": [
-                "docker.service",
-                "ollama.service"
-            ],
-            "docker_compose_roots": [],
-            "traefik": {
-                "enabled": false,
-                "api_port": 8080
-            }
-        }
-    ]
+  "hosts": [
+    {
+      "name": "nas",
+      "address": "localhost",
+      "nic": [
+        "ens10"
+      ],
+      "systemd_services": [
+        "docker.service"
+      ],
+      "docker_compose_roots": [
+        "/some/folder/"
+      ],
+      "traefik": {
+        "enabled": true,
+        "api_port": 8080
+      }
+    },
+    {
+      "name": "anotherhost",
+      "address": "192.168.1.9",
+      "systemd_services": [
+        "docker.service",
+        "ollama.service"
+      ],
+      "docker_compose_roots": [],
+      "traefik": {
+        "enabled": false,
+        "api_port": 8080
+      }
+    }
+  ],
+  "oidc": {
+    "service_url": "https://dash.somehost",
+    "callback": "/oidc/callback",
+    "config_url": "https://authentik.somehost/application/o/nas/.well-known/openid-configuration",
+    "client_id": "someId",
+    "client_secret": "someSecret",
+    "admin_claim": "groups" // Optional: claim to check for "admin" (default: "groups")
+  },
+  "local": {
+    "admins": "xero"
+  },
+  "groups": {
+    "poweruser": {
+      "services": {
+        "nas": [
+          "docker.service",
+          "authentik",
+          "audiobookshelf",
+          "chrome"
+        ],
+        "anotherhost": [
+          "docker.service",
+          "ollama.service"
+        ]
+      }
+    },
+    "bookreader": {
+      "services": {
+        "nas": [
+          "docker.service",
+          "traefik",
+          "audiobookshelf"
+        ]
+      }
+    }
+  }
 }

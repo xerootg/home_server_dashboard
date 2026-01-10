@@ -363,6 +363,10 @@ function updateSortIndicators() {
 async function loadServices() {
     try {
         const response = await fetch('/api/services');
+        if (response.status === 401) {
+            handleUnauthorized();
+            return;
+        }
         if (!response.ok) {
             throw new Error('Failed to fetch services');
         }
@@ -1726,5 +1730,86 @@ function closeActionModalAndRefresh() {
     loadServices();
 }
 
-// Load services on page load
-document.addEventListener('DOMContentLoaded', loadServices);
+// Auth state
+let authStatus = null;
+
+/**
+ * Check authentication status
+ */
+async function checkAuthStatus() {
+    try {
+        const response = await fetch('/auth/status');
+        if (!response.ok) {
+            throw new Error('Failed to check auth status');
+        }
+        authStatus = await response.json();
+        updateAuthUI();
+        return authStatus;
+    } catch (error) {
+        console.error('Auth status check failed:', error);
+        // Assume not authenticated if we can't check
+        authStatus = { authenticated: false, oidc_enabled: false };
+        updateAuthUI();
+        return authStatus;
+    }
+}
+
+/**
+ * Update the UI based on authentication status
+ */
+function updateAuthUI() {
+    const authControls = document.getElementById('authControls');
+    const userInfo = document.getElementById('userInfo');
+    
+    if (!authStatus) {
+        authControls.style.display = 'none';
+        return;
+    }
+    
+    if (authStatus.oidc_enabled && authStatus.authenticated && authStatus.user) {
+        authControls.style.display = 'flex';
+        const displayName = authStatus.user.name || authStatus.user.email || 'User';
+        userInfo.innerHTML = `<i class="bi bi-person-circle"></i> ${escapeHtml(displayName)}`;
+    } else if (authStatus.oidc_enabled && !authStatus.authenticated) {
+        // Will be redirected by the server, but show nothing in the meantime
+        authControls.style.display = 'none';
+    } else {
+        // OIDC not enabled, no auth controls needed
+        authControls.style.display = 'none';
+    }
+}
+
+/**
+ * Handle logout
+ */
+function logout() {
+    window.location.href = '/logout';
+}
+
+/**
+ * Handle 401 Unauthorized responses
+ */
+function handleUnauthorized() {
+    if (authStatus && authStatus.oidc_enabled) {
+        // Redirect to login
+        window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+    }
+}
+
+/**
+ * Wrap fetch to handle auth errors
+ */
+async function authFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        handleUnauthorized();
+        throw new Error('Authentication required');
+    }
+    return response;
+}
+
+// Load services on page load, but check auth first
+document.addEventListener('DOMContentLoaded', async function() {
+    await checkAuthStatus();
+    loadServices();
+});

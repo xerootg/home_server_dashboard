@@ -13,6 +13,9 @@ home_server_dashboard/
 ├── main.go                        # Application bootstrap (config loading, server start)
 ├── main_test.go                   # Bootstrap integration tests
 ├── services.json                  # Configuration: hosts, systemd units to monitor
+├── auth/
+│   ├── auth.go                    # OIDC authentication provider, session management, middleware
+│   └── auth_test.go               # Auth unit tests (session store, claim checking)
 ├── handlers/
 │   ├── handlers.go                # HTTP request handlers (services, logs, index)
 │   └── handlers_test.go           # Handler unit tests
@@ -66,8 +69,33 @@ home_server_dashboard/
 - **Purpose:** Application entry point and bootstrap
 - **Responsibilities:**
   - Load configuration from `services.json`
+  - Initialize OIDC authentication provider (if configured)
   - Create and start HTTP server
 - **Files:** `main.go`, `main_test.go`
+
+### `auth` Package
+- **Purpose:** OIDC authentication and session management
+- **Key Types:**
+  - `Provider` — OIDC authentication provider with session store
+  - `User` — Authenticated user information (ID, Email, Name, Groups, IsAdmin)
+  - `Session` — User session with expiry
+  - `SessionStore` — Thread-safe in-memory session storage
+  - `StateStore` — OIDC state token management
+- **Key Functions:**
+  - `NewProvider(ctx, cfg, localCfg)` — Creates OIDC provider from config
+  - `Middleware(next)` — HTTP middleware requiring authentication
+  - `LoginHandler` — Initiates OIDC login flow
+  - `CallbackHandler` — Handles OIDC callback, validates tokens
+  - `LogoutHandler` — Clears session and redirects to login
+  - `StatusHandler` — Returns JSON with auth status
+  - `GetUserFromContext(ctx)` — Retrieves authenticated user from request context
+- **Features:**
+  - OIDC discovery via `.well-known/openid-configuration`
+  - Secure session cookies (HttpOnly, SameSite)
+  - Admin claim checking (configurable, defaults to "groups" containing "admin")
+  - Automatic session cleanup
+  - **Local access detection:** If Host header differs from `service_url`, uses Basic Auth against `local.admins` list
+- **Files:** `auth/auth.go`, `auth/auth_test.go`
 
 ### `handlers` Package
 - **Purpose:** HTTP request handlers for all API endpoints
@@ -84,7 +112,7 @@ home_server_dashboard/
 ### `server` Package
 - **Purpose:** HTTP server configuration and routing
 - **Key Types:**
-  - `Config` — Server configuration (port, static dir, config path)
+  - `Config` — Server configuration (port, static dir, config path, auth provider)
   - `Server` — HTTP server with routing setup
 - **Functions:** `New()`, `DefaultConfig()`, `ListenAndServe()`, `Handler()`
 
@@ -92,7 +120,9 @@ home_server_dashboard/
 - **Purpose:** Shared configuration loading from `services.json`
 - **Key Types:**
   - `HostConfig` — Single host configuration with helper methods like `IsLocal()`, `GetPrivateIP()`
-  - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`
+  - `OIDCConfig` — OIDC authentication settings (ServiceURL, Callback, ConfigURL, ClientID, ClientSecret, AdminClaim)
+  - `LocalConfig` — Local authentication settings (Admins)
+  - `Config` — Complete configuration with helper methods like `GetLocalHostName()`, `GetHostByName()`, `IsOIDCEnabled()`
 - **Functions:** `Load()`, `Get()`, `Default()`, `isPrivateIP()`
 
 ### `query` Package
@@ -188,7 +218,18 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
     {
       // another host
     }
-  ]
+  ],
+  "oidc": {                             // Optional: OIDC authentication
+    "service_url": "https://dashboard.example.com",  // Dashboard's public URL
+    "callback": "/oidc/callback",       // Callback path for OIDC flow
+    "config_url": "https://auth.example.com/.well-known/openid-configuration",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret",
+    "admin_claim": "groups"             // Optional: claim to check for "admin" (default: "groups")
+  },
+  "local": {                            // Optional: Local authentication
+    "admins": "user1,user2"             // Comma-separated usernames for local access
+  }
 }
 ```
 
@@ -197,8 +238,12 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 **Server:** Standard library `net/http` on port 9001, configured via `server` package
 
 **Endpoints:**
-- `GET /` — Serves `static/index.html`
-- `GET /static/*` — Static file server for CSS/JS
+- `GET /` — Serves `static/index.html` (protected when OIDC enabled)
+- `GET /static/*` — Static file server for CSS/JS (always public)
+- `GET /login` — Initiates OIDC login flow (redirects to provider)
+- `GET /oidc/callback` — Handles OIDC callback, exchanges code for tokens
+- `GET /logout` — Clears session and redirects to login
+- `GET /auth/status` — Returns JSON with authentication status
 - `GET /api/services` — Returns JSON array of all services (Docker + systemd)
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
@@ -213,6 +258,7 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 |-------|---------|----------------|
 | Bootstrap | `main` | Config loading, server initialization |
 | Routing | `server` | HTTP routes, static files, server config |
+| Auth | `auth` | OIDC authentication, session management |
 | Handlers | `handlers` | Request processing, response generation |
 | Services | `services/*` | Docker/systemd provider implementations |
 | Config | `config` | Configuration loading and access |

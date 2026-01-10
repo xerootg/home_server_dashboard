@@ -11,6 +11,23 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+// OIDCConfig holds OpenID Connect authentication settings.
+type OIDCConfig struct {
+	// ServiceURL is the dashboard's public URL (used for redirect URI).
+	ServiceURL string `json:"service_url"`
+	// Callback is the path for the OIDC callback endpoint.
+	Callback string `json:"callback"`
+	// ConfigURL is the OIDC provider's discovery URL (.well-known/openid-configuration).
+	ConfigURL string `json:"config_url"`
+	// ClientID is the OAuth2 client ID.
+	ClientID string `json:"client_id"`
+	// ClientSecret is the OAuth2 client secret.
+	ClientSecret string `json:"client_secret"`
+	// AdminClaim is the claim name to check for admin access (default: "groups").
+	// The claim value should contain "admin" or the user should have admin=true.
+	AdminClaim string `json:"admin_claim,omitempty"`
+}
+
 // TraefikConfig holds Traefik API connection settings for a host.
 type TraefikConfig struct {
 	// Enabled determines whether to query Traefik for this host.
@@ -94,9 +111,22 @@ func (h *HostConfig) GetPrivateIP() string {
 	return ""
 }
 
+// LocalConfig holds local authentication settings for non-OIDC access.
+type LocalConfig struct {
+	// Admins is a comma-separated list of local usernames with admin access.
+	Admins string `json:"admins"`
+}
+
 // Config represents the complete dashboard configuration.
 type Config struct {
 	Hosts []HostConfig `json:"hosts"`
+	OIDC  *OIDCConfig  `json:"oidc,omitempty"`
+	Local *LocalConfig `json:"local,omitempty"`
+}
+
+// IsOIDCEnabled returns true if OIDC authentication is configured and enabled.
+func (c *Config) IsOIDCEnabled() bool {
+	return c.OIDC != nil && c.OIDC.ConfigURL != "" && c.OIDC.ClientID != ""
 }
 
 // GetLocalHostName returns the name of the localhost host config, or "localhost" if not found.

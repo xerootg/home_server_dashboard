@@ -2,12 +2,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/user"
+	"time"
 
+	"home_server_dashboard/auth"
 	"home_server_dashboard/config"
 	"home_server_dashboard/polkit"
 	"home_server_dashboard/server"
@@ -98,6 +101,25 @@ func main() {
 	}
 	serverCfg.StaticFS = staticFS
 	serverCfg.DocsFS = docsFS
+
+	// Initialize OIDC authentication if configured
+	if cfg.IsOIDCEnabled() {
+		log.Printf("OIDC authentication enabled, connecting to provider...")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		authProvider, err := auth.NewProvider(ctx, cfg.OIDC, cfg.Local)
+		if err != nil {
+			log.Fatalf("Failed to initialize OIDC provider: %v", err)
+		}
+		serverCfg.AuthProvider = authProvider
+		log.Printf("OIDC authentication initialized successfully")
+		if cfg.Local != nil && cfg.Local.Admins != "" {
+			log.Printf("Local authentication configured for admins: %s", cfg.Local.Admins)
+		}
+	} else {
+		log.Printf("OIDC authentication not configured, running without authentication")
+	}
 
 	// Create and start server
 	srv := server.New(serverCfg)

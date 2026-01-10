@@ -4,6 +4,22 @@ body {
     min-height: 100vh;
 }
 
+/* Auth controls in header */
+.auth-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.user-info {
+    color: #adb5bd;
+    font-size: 0.9rem;
+}
+
+.user-info i {
+    margin-right: 0.25rem;
+}
+
 /* Stats cards */
 .stat-card {
     min-width: 140px;

@@ -413,3 +413,173 @@ func TestHostConfig_GetPrivateIP(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_IsOIDCEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name: "OIDC fully configured",
+			config: Config{
+				Hosts: []HostConfig{},
+				OIDC: &OIDCConfig{
+					ServiceURL:   "https://dashboard.example.com",
+					Callback:     "/oidc/callback",
+					ConfigURL:    "https://auth.example.com/.well-known/openid-configuration",
+					ClientID:     "client123",
+					ClientSecret: "secret456",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "OIDC nil",
+			config: Config{
+				Hosts: []HostConfig{},
+				OIDC:  nil,
+			},
+			expected: false,
+		},
+		{
+			name: "OIDC empty config",
+			config: Config{
+				Hosts: []HostConfig{},
+				OIDC:  &OIDCConfig{},
+			},
+			expected: false,
+		},
+		{
+			name: "OIDC missing ConfigURL",
+			config: Config{
+				Hosts: []HostConfig{},
+				OIDC: &OIDCConfig{
+					ServiceURL:   "https://dashboard.example.com",
+					Callback:     "/oidc/callback",
+					ConfigURL:    "",
+					ClientID:     "client123",
+					ClientSecret: "secret456",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "OIDC missing ClientID",
+			config: Config{
+				Hosts: []HostConfig{},
+				OIDC: &OIDCConfig{
+					ServiceURL:   "https://dashboard.example.com",
+					Callback:     "/oidc/callback",
+					ConfigURL:    "https://auth.example.com/.well-known/openid-configuration",
+					ClientID:     "",
+					ClientSecret: "secret456",
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.IsOIDCEnabled(); got != tt.expected {
+				t.Errorf("IsOIDCEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoad_OIDCConfig(t *testing.T) {
+	tempDir := t.TempDir()
+
+	t.Run("config with OIDC", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "oidc_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "testhost",
+					"address": "localhost",
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			],
+			"oidc": {
+				"service_url": "https://dashboard.example.com",
+				"callback": "/oidc/callback",
+				"config_url": "https://auth.example.com/.well-known/openid-configuration",
+				"client_id": "myclient",
+				"client_secret": "mysecret",
+				"admin_claim": "roles"
+			}
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if cfg.OIDC == nil {
+			t.Fatal("Expected OIDC config to be set")
+		}
+
+		if cfg.OIDC.ServiceURL != "https://dashboard.example.com" {
+			t.Errorf("OIDC.ServiceURL = %v, want https://dashboard.example.com", cfg.OIDC.ServiceURL)
+		}
+		if cfg.OIDC.Callback != "/oidc/callback" {
+			t.Errorf("OIDC.Callback = %v, want /oidc/callback", cfg.OIDC.Callback)
+		}
+		if cfg.OIDC.ConfigURL != "https://auth.example.com/.well-known/openid-configuration" {
+			t.Errorf("OIDC.ConfigURL = %v, want https://auth.example.com/.well-known/openid-configuration", cfg.OIDC.ConfigURL)
+		}
+		if cfg.OIDC.ClientID != "myclient" {
+			t.Errorf("OIDC.ClientID = %v, want myclient", cfg.OIDC.ClientID)
+		}
+		if cfg.OIDC.ClientSecret != "mysecret" {
+			t.Errorf("OIDC.ClientSecret = %v, want mysecret", cfg.OIDC.ClientSecret)
+		}
+		if cfg.OIDC.AdminClaim != "roles" {
+			t.Errorf("OIDC.AdminClaim = %v, want roles", cfg.OIDC.AdminClaim)
+		}
+
+		if !cfg.IsOIDCEnabled() {
+			t.Error("Expected IsOIDCEnabled() to return true")
+		}
+	})
+
+	t.Run("config without OIDC", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "no_oidc_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "testhost",
+					"address": "localhost",
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if cfg.OIDC != nil {
+			t.Error("Expected OIDC config to be nil when not specified")
+		}
+
+		if cfg.IsOIDCEnabled() {
+			t.Error("Expected IsOIDCEnabled() to return false")
+		}
+	})
+}

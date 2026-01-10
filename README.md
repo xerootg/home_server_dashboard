@@ -127,9 +127,75 @@ services:
 
 Descriptions for systemd units are automatically fetched from the unit's `Description` field.
 
+## Authentication
+
+The dashboard supports optional authentication via OIDC (for external access) and PAM-based local authentication (for direct/internal access).
+
+### OIDC Authentication
+
+For external access through a reverse proxy, configure OIDC to authenticate users against an identity provider (e.g., Authentik, Keycloak, Auth0):
+
+```json
+{
+  "oidc": {
+    "service_url": "https://dashboard.example.com",
+    "callback": "/oidc/callback",
+    "config_url": "https://auth.example.com/application/o/myapp/.well-known/openid-configuration",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret",
+    "admin_claim": "groups"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `service_url` | The public URL where the dashboard is accessed |
+| `callback` | OAuth2 callback path (typically `/oidc/callback`) |
+| `config_url` | OIDC discovery endpoint URL |
+| `client_id` | OAuth2 client ID from your identity provider |
+| `client_secret` | OAuth2 client secret |
+| `admin_claim` | Claim to check for admin access (default: `groups`) |
+
+Users must have "admin" in their configured claim (e.g., be a member of an "admin" group) to access the dashboard.
+
+### Local Authentication
+
+For direct access (when the Host header doesn't match `service_url`), users are authenticated via PAM using their system credentials:
+
+```json
+{
+  "local": {
+    "admins": "user1,user2"
+  }
+}
+```
+
+Only usernames listed in `admins` can authenticate locally. Passwords are validated against the system's PAM configuration (typically `/etc/shadow`).
+
+**Note:** The systemd service requires `CAP_DAC_READ_SEARCH` capability for PAM authentication to read shadow passwords. This is configured automatically by the install script.
+
+### No Authentication
+
+If neither `oidc` nor `local` sections are configured, the dashboard runs without authentication (not recommended for production).
+
 ## Service Control Setup
 
-The dashboard can start, stop, and restart services. This requires proper authentication setup.
+The dashboard can start, stop, and restart services. This requires proper authorization setup depending on whether the host is local or remote.
+
+### Polkit Configuration (Local Host)
+
+For local systemd service control, the dashboard uses D-Bus to communicate with systemd. D-Bus requires polkit authorization to allow non-root users to manage services.
+
+**The install script automatically generates and installs polkit rules** to `/etc/polkit-1/rules.d/50-home-server-dashboard.rules`. This grants the dashboard user permission to start, stop, and restart only the specific systemd services defined in your `services.json`.
+
+To regenerate polkit rules manually (e.g., after adding new services):
+
+```bash
+./nas-dashboard -generate-polkit | sudo tee /etc/polkit-1/rules.d/50-home-server-dashboard.rules
+```
+
+**Why polkit instead of sudo?** The systemd service runs with `NoNewPrivileges=true` for security hardening, which prevents using sudo. Polkit provides fine-grained authorization for D-Bus operations without requiring privilege escalation.
 
 ### SSH Key Authentication (Remote Hosts)
 
@@ -143,9 +209,9 @@ ssh-keygen -t ed25519 -C "dashboard"
 ssh-copy-id user@192.168.1.9
 ```
 
-### Sudoers Configuration
+### Sudoers Configuration (Remote Hosts)
 
-Systemctl commands require root privileges. Configure passwordless sudo for only the specific services you want to manage.
+For remote hosts, systemctl commands are executed over SSH and require sudo privileges. Configure passwordless sudo for only the specific services you want to manage.
 
 **Generate sudoers configuration automatically from your `services.json`:**
 

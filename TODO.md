@@ -32,7 +32,7 @@
 | port should be defined, optionally as well as ip, from services.json | ⬜ |
 | a pipeline (github actions) that runs on every push which runs the tests, including integration (docker, systemd) | ⬜ |
 | implement pub/sub for updates instead of depending on browser polling, use https://github.com/gorilla/websocket to publish updates. setup a system to monitor for state changes in go, and refactor the frontend to dynamically handle these events. | ⬜ |
-| Add security, using OIDC. Any user which has the admin claim can use this app. all endpoints will need to accept a token, which will need to be plumbed through to some central server-side context to verify the user is logged in | ⬜ |
-| Add a security fallback, using PAM as the auth verification, as a failover when oauth is offline. issue a JWT which is valid for the PAM result. Members of the docker group have access. | ⬜ |
+| Add security, using OIDC. Any user which has the admin claim can use this app. all endpoints will need to accept a token, which will need to be plumbed through to some central server-side context to verify the user is logged in | ✅ Done |
+| Add a security fallback, using PAM as the auth verification, as a failover when oauth is offline. issue a JWT which is valid for the PAM result. Members of the docker group have access. | ✅ Done |
 | run fail2ban or something infront of auth to block requests from abusive IPs | ⬜ |
 | create a group concept, where a user can see some subset of services, with limited API access to those services, such as start/stop | ⬜ |

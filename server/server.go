@@ -6,16 +6,18 @@ import (
 	"log"
 	"net/http"
 
+	"home_server_dashboard/auth"
 	"home_server_dashboard/handlers"
 )
 
 // Config holds server configuration options.
 type Config struct {
-	Port       string
-	StaticDir  string // Deprecated: use StaticFS instead
-	ConfigPath string
-	StaticFS   fs.FS  // Embedded static filesystem
-	DocsFS     fs.FS  // Embedded docs filesystem
+	Port         string
+	StaticDir    string       // Deprecated: use StaticFS instead
+	ConfigPath   string
+	StaticFS     fs.FS        // Embedded static filesystem
+	DocsFS       fs.FS        // Embedded docs filesystem
+	AuthProvider *auth.Provider // OIDC auth provider (nil if auth disabled)
 }
 
 // DefaultConfig returns the default server configuration.
@@ -50,7 +52,7 @@ func New(cfg *Config) *Server {
 
 // setupRoutes configures all HTTP routes.
 func (s *Server) setupRoutes() {
-	// Serve static files from embedded filesystem
+	// Serve static files from embedded filesystem (always public for login page styling)
 	if s.config.StaticFS != nil {
 		fs := http.FileServer(http.FS(s.config.StaticFS))
 		s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
@@ -63,20 +65,41 @@ func (s *Server) setupRoutes() {
 	// Set the embedded filesystems for handlers
 	handlers.SetEmbeddedFS(s.config.StaticFS, s.config.DocsFS)
 
-	// Serve index.html at root
-	s.mux.HandleFunc("/", handlers.IndexHandler)
+	// Auth routes (always public)
+	if s.config.AuthProvider != nil {
+		s.mux.HandleFunc("/login", s.config.AuthProvider.LoginHandler)
+		s.mux.HandleFunc("/oidc/callback", s.config.AuthProvider.CallbackHandler)
+		s.mux.HandleFunc("/logout", s.config.AuthProvider.LogoutHandler)
+		s.mux.HandleFunc("/auth/status", s.config.AuthProvider.StatusHandler)
+	} else {
+		// When auth is disabled, provide a status endpoint that says so
+		s.mux.HandleFunc("/auth/status", auth.NoAuthStatusHandler)
+	}
 
-	// API endpoints
-	s.mux.HandleFunc("/api/services", handlers.ServicesHandler)
-	s.mux.HandleFunc("/api/logs", handlers.DockerLogsHandler)
-	s.mux.HandleFunc("/api/logs/systemd", handlers.SystemdLogsHandler)
-	s.mux.HandleFunc("/api/bangAndPipeToRegex", handlers.BangAndPipeHandler)
-	s.mux.HandleFunc("/api/docs/bangandpipe", handlers.BangAndPipeDocsHandler)
+	// Create middleware wrapper for protected routes
+	protect := func(h http.HandlerFunc) http.HandlerFunc {
+		if s.config.AuthProvider != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				s.config.AuthProvider.Middleware(http.HandlerFunc(h)).ServeHTTP(w, r)
+			}
+		}
+		return h
+	}
 
-	// Service control actions (start/stop/restart)
-	s.mux.HandleFunc("/api/services/start", handlers.ServiceActionHandler)
-	s.mux.HandleFunc("/api/services/stop", handlers.ServiceActionHandler)
-	s.mux.HandleFunc("/api/services/restart", handlers.ServiceActionHandler)
+	// Serve index.html at root (protected)
+	s.mux.HandleFunc("/", protect(handlers.IndexHandler))
+
+	// API endpoints (protected)
+	s.mux.HandleFunc("/api/services", protect(handlers.ServicesHandler))
+	s.mux.HandleFunc("/api/logs", protect(handlers.DockerLogsHandler))
+	s.mux.HandleFunc("/api/logs/systemd", protect(handlers.SystemdLogsHandler))
+	s.mux.HandleFunc("/api/bangAndPipeToRegex", protect(handlers.BangAndPipeHandler))
+	s.mux.HandleFunc("/api/docs/bangandpipe", protect(handlers.BangAndPipeDocsHandler))
+
+	// Service control actions (start/stop/restart) (protected)
+	s.mux.HandleFunc("/api/services/start", protect(handlers.ServiceActionHandler))
+	s.mux.HandleFunc("/api/services/stop", protect(handlers.ServiceActionHandler))
+	s.mux.HandleFunc("/api/services/restart", protect(handlers.ServiceActionHandler))
 }
 
 // Handler returns the HTTP handler for the server.
