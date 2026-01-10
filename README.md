@@ -58,18 +58,23 @@ go build -o nas-dashboard && ./nas-dashboard
 Install as a systemd service:
 
 ```bash
-sudo ./install.sh [username]
+./install.sh [username]
 ```
 
+The install script:
 - Compiles and installs binary to `/usr/local/bin/nas-dashboard`
 - Copies `services.json` (or `sample.services.json`) to `/etc/nas_dashboard/services.json`
+- **Auto-updates config**: If your local `services.json` is newer than the installed version, it will be copied automatically
 - Installs and enables the systemd service
-- `username` defaults to the user who invoked sudo
+- Generates polkit rules for local systemd service control
+- `username` defaults to the current user
+
+The script uses `sudo` internally only for commands that require it, so you don't need to run it with `sudo`. This however does mean you need sudoers access ;)
 
 Uninstall:
 
 ```bash
-sudo ./uninstall.sh
+./uninstall.sh
 ```
 
 ## How It Works

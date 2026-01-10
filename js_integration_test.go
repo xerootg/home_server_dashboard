@@ -24,7 +24,7 @@ func TestJavaScriptSearchFunctions(t *testing.T) {
 		t.Fatal("Could not determine test file location")
 	}
 	projectDir := filepath.Dir(filename)
-	testFile := filepath.Join(projectDir, "tests", "js", "search_test.js")
+	testFile := filepath.Join(projectDir, "frontend", "run-tests.mjs")
 
 	// Run the JavaScript tests
 	cmd := exec.Command(nodePath, testFile)

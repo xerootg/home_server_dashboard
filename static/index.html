@@ -15,7 +15,7 @@
             <h1 class="text-center mb-0"><i class="bi bi-house-door-fill"></i> Home Server Dashboard</h1>
             <div id="authControls" class="auth-controls" style="display: none;">
                 <span class="user-info me-2" id="userInfo"></span>
-                <button class="btn btn-outline-secondary btn-sm" onclick="logout()" title="Logout">
+                <button class="btn btn-outline-secondary btn-sm" onclick="window.__dashboard.logout()" title="Logout">
                     <i class="bi bi-box-arrow-right"></i> Logout
                 </button>
             </div>
@@ -23,7 +23,7 @@
         
         <div class="row justify-content-center g-3 mb-4">
             <div class="col-auto">
-                <div class="card text-center stat-card" data-filter="all" onclick="toggleFilter('all')">
+                <div class="card text-center stat-card" data-filter="all" onclick="window.__dashboard.toggleFilter('all')">
                     <div class="card-body">
                         <h2 class="card-title text-primary mb-0" id="totalCount">-</h2>
                         <p class="card-text text-muted small mb-0">Total Services</p>
@@ -31,7 +31,7 @@
                 </div>
             </div>
             <div class="col-auto">
-                <div class="card text-center stat-card" data-filter="running" onclick="toggleFilter('running')">
+                <div class="card text-center stat-card" data-filter="running" onclick="window.__dashboard.toggleFilter('running')">
                     <div class="card-body">
                         <h2 class="card-title text-success mb-0" id="runningCount">-</h2>
                         <p class="card-text text-muted small mb-0">Running</p>
@@ -39,7 +39,7 @@
                 </div>
             </div>
             <div class="col-auto">
-                <div class="card text-center stat-card" data-filter="stopped" onclick="toggleFilter('stopped')">
+                <div class="card text-center stat-card" data-filter="stopped" onclick="window.__dashboard.toggleFilter('stopped')">
                     <div class="card-body">
                         <h2 class="card-title text-danger mb-0" id="stoppedCount">-</h2>
                         <p class="card-text text-muted small mb-0">Stopped</p>
@@ -47,7 +47,7 @@
                 </div>
             </div>
             <div class="col-auto">
-                <div class="card text-center stat-card source-filter" data-source-filter="docker" onclick="toggleSourceFilter('docker')">
+                <div class="card text-center stat-card source-filter" data-source-filter="docker" onclick="window.__dashboard.toggleSourceFilter('docker')">
                     <div class="card-body">
                         <h2 class="card-title mb-0" id="dockerCount"><i class="bi bi-box text-primary"></i> -</h2>
                         <p class="card-text text-muted small mb-0">Docker</p>
@@ -55,7 +55,7 @@
                 </div>
             </div>
             <div class="col-auto">
-                <div class="card text-center stat-card source-filter" data-source-filter="systemd" onclick="toggleSourceFilter('systemd')">
+                <div class="card text-center stat-card source-filter" data-source-filter="systemd" onclick="window.__dashboard.toggleSourceFilter('systemd')">
                     <div class="card-body">
                         <h2 class="card-title mb-0" id="systemdCount"><i class="bi bi-gear-fill text-info"></i> -</h2>
                         <p class="card-text text-muted small mb-0">Systemd</p>
@@ -63,7 +63,7 @@
                 </div>
             </div>
             <div class="col-auto">
-                <div class="card text-center stat-card source-filter" data-source-filter="traefik" onclick="toggleSourceFilter('traefik')">
+                <div class="card text-center stat-card source-filter" data-source-filter="traefik" onclick="window.__dashboard.toggleSourceFilter('traefik')">
                     <div class="card-body">
                         <h2 class="card-title mb-0" id="traefikCount"><i class="bi bi-signpost-split text-warning"></i> -</h2>
                         <p class="card-text text-muted small mb-0">Traefik</p>
@@ -80,22 +80,22 @@
                         <i class="bi bi-search"></i>
                     </div>
                     <div class="table-search-input-wrapper">
-                        <input type="text" id="tableSearchInput" class="table-search-input" placeholder="Search services..." oninput="onTableSearchInput(this.value)" onkeydown="onTableSearchKeydown(event)">
+                        <input type="text" id="tableSearchInput" class="table-search-input" placeholder="Search services..." oninput="window.__dashboard.onTableSearchInput(this.value)" onkeydown="window.__dashboard.onTableSearchKeydown(event)">
                     </div>
                     <span class="table-match-count" id="tableMatchCount"></span>
-                    <button class="table-search-btn" id="tableCaseToggle" onclick="toggleTableCaseSensitivity()" title="Match Case">
+                    <button class="table-search-btn" id="tableCaseToggle" onclick="window.__dashboard.toggleTableCaseSensitivity()" title="Match Case">
                         <span class="case-icon">Aa</span>
                     </button>
-                    <button class="table-search-btn" id="tableRegexToggle" onclick="toggleTableRegex()" title="Use Regular Expression">
+                    <button class="table-search-btn" id="tableRegexToggle" onclick="window.__dashboard.toggleTableRegex()" title="Use Regular Expression">
                         <span class="regex-icon">.*</span>
                     </button>
-                    <button class="table-search-btn" id="tableBangPipeToggle" onclick="toggleTableBangAndPipe()" title="Bang &amp; Pipe mode: Use !&amp;| operators">
+                    <button class="table-search-btn" id="tableBangPipeToggle" onclick="window.__dashboard.toggleTableBangAndPipe()" title="Bang &amp; Pipe mode: Use !&amp;| operators">
                         <span class="bangpipe-icon">!&amp;|</span>
                     </button>
-                    <button class="table-search-btn table-help-btn" onclick="showHelpModal()" title="Query language help">
+                    <button class="table-search-btn table-help-btn" onclick="window.__dashboard.showHelpModal()" title="Query language help">
                         <i class="bi bi-question-circle"></i>
                     </button>
-                    <button class="table-search-btn table-clear-btn" id="tableClearBtn" onclick="clearTableSearch()" title="Clear search" style="display: none;">
+                    <button class="table-search-btn table-clear-btn" id="tableClearBtn" onclick="window.__dashboard.clearTableSearch()" title="Clear search" style="display: none;">
                         <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
@@ -108,12 +108,12 @@
                 <table class="table table-hover table-striped mb-0">
                     <thead class="table-dark">
                         <tr>
-                            <th data-sort="name" onclick="toggleSort('name')" class="sortable">Service<span class="sort-indicator"></span></th>
-                            <th data-sort="project" onclick="toggleSort('project')" class="sortable">Project<span class="sort-indicator"></span></th>
-                            <th data-sort="host" onclick="toggleSort('host')" class="sortable">Host<span class="sort-indicator"></span></th>
-                            <th data-sort="container" onclick="toggleSort('container')" class="sortable">Container<span class="sort-indicator"></span></th>
-                            <th data-sort="status" onclick="toggleSort('status')" class="sortable">Status<span class="sort-indicator"></span></th>
-                            <th data-sort="image" onclick="toggleSort('image')" class="sortable">Image<span class="sort-indicator"></span></th>
+                            <th data-sort="name" onclick="window.__dashboard.toggleSort('name')" class="sortable">Service<span class="sort-indicator"></span></th>
+                            <th data-sort="project" onclick="window.__dashboard.toggleSort('project')" class="sortable">Project<span class="sort-indicator"></span></th>
+                            <th data-sort="host" onclick="window.__dashboard.toggleSort('host')" class="sortable">Host<span class="sort-indicator"></span></th>
+                            <th data-sort="container" onclick="window.__dashboard.toggleSort('container')" class="sortable">Container<span class="sort-indicator"></span></th>
+                            <th data-sort="status" onclick="window.__dashboard.toggleSort('status')" class="sortable">Status<span class="sort-indicator"></span></th>
+                            <th data-sort="image" onclick="window.__dashboard.toggleSort('image')" class="sortable">Image<span class="sort-indicator"></span></th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -127,7 +127,7 @@
         </div>
 
         <div class="text-center mt-3">
-            <button class="btn btn-primary" onclick="loadServices()">
+            <button class="btn btn-primary" onclick="window.__dashboard.loadServices()">
                 <i class="bi bi-arrow-clockwise"></i> Refresh
             </button>
         </div>

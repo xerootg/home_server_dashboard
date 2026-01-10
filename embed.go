@@ -1,12 +1,15 @@
 // Embedded static files and documentation for the dashboard.
 package main
 
+//go:generate npm install
+//go:generate npm run build
+
 import (
 	"embed"
 	"io/fs"
 )
 
-//go:embed static/*
+//go:embed static/app.js static/app.js.map static/index.html static/style.css
 var staticFiles embed.FS
 
 //go:embed docs/*
