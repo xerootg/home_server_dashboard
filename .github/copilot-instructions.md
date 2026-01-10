@@ -50,6 +50,8 @@ home_server_dashboard/
 │   └── traefik/
 │       ├── traefik.go             # Traefik API client for hostname lookup
 │       ├── traefik_test.go        # Unit tests for Traefik client
+│       ├── service.go             # Traefik service provider and service implementation
+│       ├── service_test.go        # Unit tests for Traefik service provider
 │       ├── matcher.go             # MatcherLookupService for hostname extraction with state tracking
 │       └── matcher_test.go        # Unit tests for matcher lookup service
 ├── static/
@@ -176,29 +178,40 @@ home_server_dashboard/
   - Streams logs via journalctl
 
 ### `services/traefik` Package
-- **Purpose:** Traefik API client for hostname discovery
+- **Purpose:** Traefik API client for hostname discovery and external service monitoring
 - **Key Types:**
   - `Config` — Traefik API connection settings (Enabled, APIPort)
   - `Client` — HTTP client for querying Traefik API (includes MatcherLookupService)
   - `Router` — Represents a Traefik HTTP router
+  - `TraefikAPIService` — Represents a service from the Traefik `/api/http/services` endpoint
+  - `Provider` — Implements `services.Provider` for Traefik-only services (external services not backed by Docker/systemd)
+  - `TraefikService` — Implements `services.Service` for individual Traefik services (stub implementation for logs/start/stop/restart)
   - `MatcherLookupService` — Stateful hostname extraction with change tracking
   - `MatcherInfo` — Detailed matcher information (type, hostname, exactness)
   - `MatcherType` — Enum: `MatcherTypeHost`, `MatcherTypeHostRegexp`
   - `RouterMatcherState` — Tracks rule changes and error states per router
 - **Key Functions:**
   - `NewClient()` — Creates a new Traefik API client with embedded matcher service
+  - `NewProvider()` — Creates a Traefik service provider for external service discovery
   - `GetRouters()` — Fetches all HTTP routers from Traefik API
-  - `GetServiceHostMappings()` — Returns map of service names to hostnames (uses matcher service)
+  - `GetTraefikServices()` — Fetches all services from Traefik API `/api/http/services`
+  - `GetServiceHostMappings()` — Returns map of service/router names to hostnames (uses matcher service, includes router-name-based mappings)
+  - `GetClaimedBackendServices()` — Returns backend services "claimed" by routers owned by existing Docker/systemd services
   - `ExtractHostnames()` — Parses Host() and HostRegexp() matchers from Traefik rules
   - `ExtractMatchers()` — Returns detailed MatcherInfo for each hostname matcher
   - `NewMatcherLookupService()` — Creates a matcher service for state-tracked extraction
   - `ProcessRouter()` — Extracts hostnames with state tracking and logging
 - **Features:**
-  - Queries Traefik REST API at `/api/http/routers`
+  - Queries Traefik REST API at `/api/http/routers` and `/api/http/services`
+  - **External Service Discovery:** Discovers services registered in Traefik that are not backed by Docker/systemd (e.g., reverse-proxied external hosts)
+  - **Health Status:** Shows service health based on Traefik's server status (UP/DOWN)
   - Extracts hostnames from both `Host()` and `HostRegexp()` rule matchers
   - **Host() Preferred:** When both `Host()` and `HostRegexp()` are present, only exact `Host()` matches are used
   - Supports SSH tunneling for remote Traefik instances
   - Matches services by normalized name (strips `@provider` suffix)
+  - **Filters Internal Services:** Excludes Traefik internal services (api@internal, dashboard@internal, etc.)
+  - **Filters Claimed Backend Services:** When a Docker service creates a router pointing to a different backend (e.g., `jellyfin@docker` → `jellyfin-svc@file`), the backend service is filtered out since it's "owned" by the Docker service
+  - **Router-Name-Based URL Mapping:** Docker services get Traefik URLs even when their router points to an external backend
   - **State Tracking:** Logs when router rules change between fetches
   - **Error Recovery:** Logs when a previously-failing router recovers
   - **HostRegexp Fallback:** Extracts domain suffixes from regex patterns only when no `Host()` is present (e.g., `{subdomain:[a-z]+}.example.com` → `example.com`)
@@ -296,9 +309,10 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 - `GET /oidc/callback` — Handles OIDC callback, exchanges code for tokens
 - `GET /logout` — Clears session and redirects to login
 - `GET /auth/status` — Returns JSON with authentication status
-- `GET /api/services` — Returns JSON array of all services (Docker + systemd)
+- `GET /api/services` — Returns JSON array of all services (Docker + systemd + Traefik)
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
+- `GET /api/logs/traefik?service=<name>&host=<host>` — SSE stream for Traefik (returns stub message, logs not supported)
 - `GET /api/bangAndPipeToRegex?expr=<expr>` — Compiles Bang & Pipe expression to AST
 - `GET /api/docs/bangandpipe` — Returns rendered HTML documentation for Bang & Pipe syntax
 - `POST /api/services/start` — Start a service (SSE stream of status updates)
@@ -312,7 +326,7 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 | Routing | `server` | HTTP routes, static files, server config |
 | Auth | `auth` | OIDC authentication, session management |
 | Handlers | `handlers` | Request processing, response generation |
-| Services | `services/*` | Docker/systemd provider implementations |
+| Services | `services/*` | Docker/systemd/Traefik provider implementations |
 | Config | `config` | Configuration loading and access |
 | Query | `query` | Bang & Pipe expression parsing |
 
@@ -323,6 +337,7 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 | Docker | Docker API via socket | `github.com/docker/docker/client` |
 | Systemd (local) | D-Bus | `github.com/coreos/go-systemd/v22/dbus` |
 | Systemd (remote) | SSH + systemctl | `os/exec` with `ssh` command |
+| Traefik | Traefik REST API | Standard `net/http` client |
 
 **ServiceInfo struct (in `services/service.go`):**
 ```go

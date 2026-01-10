@@ -218,6 +218,8 @@ type ServiceHostMapping struct {
 // GetServiceHostMappings fetches all routers and extracts service->hostname mappings.
 // The serviceName in the mapping will be the Traefik service name (e.g., "myservice@docker").
 // Uses the MatcherLookupService to track state changes and log appropriately.
+// Also returns router-name-based mappings for cases where a Docker service creates a router
+// that points to a different backend (e.g., jellyfin@docker router -> jellyfin-svc@file service).
 func (c *Client) GetServiceHostMappings(ctx context.Context) (map[string][]string, error) {
 	routers, err := c.GetRouters(ctx)
 	if err != nil {
@@ -239,29 +241,76 @@ func (c *Client) GetServiceHostMappings(ctx context.Context) (map[string][]strin
 		// Traefik service names may have @provider suffix, normalize to just the service name
 		serviceName := normalizeServiceName(router.Service)
 
-		existing := result[serviceName]
-		for _, h := range hostnames {
-			// Avoid duplicates
-			found := false
-			for _, e := range existing {
-				if e == h {
-					found = true
-					break
-				}
-			}
-			if !found {
-				existing = append(existing, h)
-			}
+		// Add mapping for the service name
+		addHostnames(result, serviceName, hostnames)
+
+		// Also add mapping for the router name, in case it differs from the service name.
+		// This handles cases where a Docker service creates a router that points to a different
+		// backend (e.g., Docker labels create "jellyfin@docker" router that points to "jellyfin-svc@file").
+		// The Docker service "jellyfin" should still show the Traefik URL.
+		routerName := normalizeServiceName(router.Name)
+		if routerName != serviceName {
+			addHostnames(result, routerName, hostnames)
 		}
-		result[serviceName] = existing
 	}
 
 	return result, nil
 }
 
+// addHostnames adds hostnames to a result map, avoiding duplicates.
+func addHostnames(result map[string][]string, key string, hostnames []string) {
+	existing := result[key]
+	for _, h := range hostnames {
+		// Avoid duplicates
+		found := false
+		for _, e := range existing {
+			if e == h {
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing = append(existing, h)
+		}
+	}
+	result[key] = existing
+}
+
 // GetMatcherService returns the matcher lookup service for advanced state management.
 func (c *Client) GetMatcherService() *MatcherLookupService {
 	return c.matcherService
+}
+
+// GetClaimedBackendServices returns a map of backend service names that are "claimed" by
+// routers owned by Docker or other providers. This is used to filter out Traefik services
+// that should not appear separately because their router is owned by an existing service.
+// For example, if Docker service "jellyfin" creates router "jellyfin@docker" pointing to
+// "jellyfin-svc@file", then "jellyfin-svc" should be filtered out.
+// existingServices is a set of service names that already exist (Docker/systemd).
+func (c *Client) GetClaimedBackendServices(ctx context.Context, existingServices map[string]bool) (map[string]bool, error) {
+	routers, err := c.GetRouters(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	claimed := make(map[string]bool)
+	for _, router := range routers {
+		// Normalize router name (strip @provider suffix)
+		routerName := normalizeServiceName(router.Name)
+
+		// Check if the router is owned by an existing Docker/systemd service
+		if existingServices[routerName] {
+			// This router is owned by an existing service
+			// Mark its backend service as claimed
+			backendName := normalizeServiceName(router.Service)
+			if backendName != routerName {
+				// Only mark if the backend is different from the router owner
+				claimed[backendName] = true
+			}
+		}
+	}
+
+	return claimed, nil
 }
 
 // normalizeServiceName strips the @provider suffix from Traefik service names.

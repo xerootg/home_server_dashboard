@@ -93,6 +93,70 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 	// Enrich services with Traefik hostnames
 	allServices = enrichWithTraefikURLs(ctx, cfg, allServices)
 
+	// Get Traefik-only services (services registered in Traefik but not in Docker/systemd)
+	// Build a set of existing service names to filter out duplicates
+	// We need to track multiple possible names that Traefik might use:
+	// - The actual service name
+	// - The TraefikServiceName from Docker labels
+	// - Common Traefik naming patterns like servicename-projectname
+	// - Normalized names (underscores to hyphens, as Traefik does)
+	existingServices := make(map[string]bool)
+	for _, svc := range allServices {
+		existingServices[svc.Name] = true
+		// Also add normalized name (Traefik converts underscores to hyphens)
+		normalizedName := normalizeForTraefik(svc.Name)
+		if normalizedName != svc.Name {
+			existingServices[normalizedName] = true
+		}
+		// Also add TraefikServiceName if present (from Docker labels)
+		if svc.TraefikServiceName != "" {
+			existingServices[svc.TraefikServiceName] = true
+		}
+		// Add common Traefik naming pattern: servicename-projectname (used by Docker provider)
+		if svc.Project != "" && svc.Project != "systemd" && svc.Project != "traefik" {
+			existingServices[svc.Name+"-"+svc.Project] = true
+			// Also add normalized version
+			existingServices[normalizedName+"-"+svc.Project] = true
+		}
+		// Also add container name as a possible match
+		if svc.ContainerName != "" {
+			existingServices[svc.ContainerName] = true
+			// And normalized container name
+			normalizedContainerName := normalizeForTraefik(svc.ContainerName)
+			if normalizedContainerName != svc.ContainerName {
+				existingServices[normalizedContainerName] = true
+			}
+		}
+	}
+
+	// Get Traefik services from each host with Traefik enabled
+	for _, host := range cfg.Hosts {
+		if !host.Traefik.Enabled {
+			continue
+		}
+
+		traefikProvider := traefik.NewProvider(host.Name, host.Address, host.Traefik.APIPort)
+		defer traefikProvider.Close()
+
+		traefikServices, err := traefikProvider.GetServices(ctx, existingServices)
+		if err != nil {
+			log.Printf("Warning: failed to get Traefik services from %s: %v", host.Name, err)
+			continue
+		}
+
+		// Set HostIP for each Traefik service
+		for i := range traefikServices {
+			traefikServices[i].HostIP = hostIPMap[traefikServices[i].Host]
+		}
+
+		allServices = append(allServices, traefikServices...)
+
+		// Add these services to existing set to avoid duplicates from other hosts
+		for _, svc := range traefikServices {
+			existingServices[svc.Name] = true
+		}
+	}
+
 	return allServices, nil
 }
 
@@ -156,6 +220,12 @@ func applyPortRemaps(svcList []services.ServiceInfo, remaps []docker.PortRemap) 
 	return svcList
 }
 
+// normalizeForTraefik converts a name to match Traefik's naming convention.
+// Traefik converts underscores to hyphens in service names from Docker.
+func normalizeForTraefik(name string) string {
+	return strings.ReplaceAll(name, "_", "-")
+}
+
 // enrichWithTraefikURLs adds Traefik-exposed URLs to services.
 // It queries each host's Traefik API for router information and matches
 // services by their name.
@@ -213,15 +283,37 @@ func enrichWithTraefikURLs(ctx context.Context, cfg *config.Config, svcList []se
 			hostnames = traefikMappings[svc.Name]
 		}
 
+		// Try with normalized name (underscores to hyphens, as Traefik does)
+		if len(hostnames) == 0 {
+			normalizedName := normalizeForTraefik(svc.Name)
+			if normalizedName != svc.Name {
+				hostnames = traefikMappings[normalizedName]
+			}
+		}
+
 		// Traefik often names services as "servicename-projectname", so try that pattern
 		if len(hostnames) == 0 && svc.Project != "" && svc.Project != "systemd" {
 			traefikServiceName := svc.Name + "-" + svc.Project
 			hostnames = traefikMappings[traefikServiceName]
 		}
 
+		// Try the same pattern but with normalized name (underscores to hyphens)
+		if len(hostnames) == 0 && svc.Project != "" && svc.Project != "systemd" {
+			traefikServiceName := normalizeForTraefik(svc.Name) + "-" + svc.Project
+			hostnames = traefikMappings[traefikServiceName]
+		}
+
 		// Also try with container name for containers that might use that
 		if len(hostnames) == 0 && svc.ContainerName != "" {
 			hostnames = traefikMappings[svc.ContainerName]
+		}
+
+		// Try normalized container name
+		if len(hostnames) == 0 && svc.ContainerName != "" {
+			normalizedContainerName := normalizeForTraefik(svc.ContainerName)
+			if normalizedContainerName != svc.ContainerName {
+				hostnames = traefikMappings[normalizedContainerName]
+			}
 		}
 
 		// Convert hostnames to full URLs (https by default since Traefik usually terminates TLS)
@@ -348,6 +440,63 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// TraefikLogsHandler handles GET /api/logs/traefik requests.
+// Traefik services don't support log streaming, so this returns a stub message.
+func TraefikLogsHandler(w http.ResponseWriter, r *http.Request) {
+	serviceName := r.URL.Query().Get("service")
+	hostName := r.URL.Query().Get("host")
+	if serviceName == "" {
+		http.Error(w, "service parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Check user permissions
+	user := auth.GetUserFromContext(r.Context())
+	if user != nil && !user.CanAccessService(hostName, serviceName) {
+		http.Error(w, "Access denied: you do not have permission to view logs for this service", http.StatusForbidden)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Send a message explaining that logs are not supported for Traefik services
+	fmt.Fprintf(w, "data: ═══════════════════════════════════════════════════════════════\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: Logs are not supported for Traefik services.\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: \n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: Traefik services are external services registered in Traefik's\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: routing configuration. They may be running on external hosts,\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: load balancers, or other infrastructure not managed by this\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: dashboard.\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: \n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: To view logs for this service, please check the host where the\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: actual service is running.\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: ═══════════════════════════════════════════════════════════════\n\n")
+	flusher.Flush()
+
+	// Keep connection open briefly so client receives all messages
+	<-r.Context().Done()
 }
 
 // DockerLogsHandler handles GET /api/logs requests for streaming Docker container logs.
@@ -566,6 +715,8 @@ func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
 		err = handleDockerAction(ctx, cfg, req, action, sendEvent)
 	} else if req.Source == "systemd" {
 		err = handleSystemdAction(ctx, cfg, req, action, sendEvent)
+	} else if req.Source == "traefik" {
+		err = handleTraefikAction(ctx, cfg, req, action, sendEvent)
 	} else {
 		sendEvent("error", "Unknown service source: "+req.Source)
 		sendEvent("complete", "failed")
@@ -787,4 +938,18 @@ func handleSystemdAction(ctx context.Context, cfg *config.Config, req ServiceAct
 	}
 
 	return nil
+}
+
+// handleTraefikAction handles actions for Traefik services (not supported).
+func handleTraefikAction(ctx context.Context, cfg *config.Config, req ServiceActionRequest, action string, sendEvent func(string, string)) error {
+	sendEvent("status", "Traefik services cannot be controlled from this dashboard.")
+	sendEvent("status", "")
+	sendEvent("status", "Traefik services are external services registered in Traefik's")
+	sendEvent("status", "routing configuration. They may be running on external hosts,")
+	sendEvent("status", "load balancers, or other infrastructure not managed by this dashboard.")
+	sendEvent("status", "")
+	sendEvent("status", fmt.Sprintf("To %s this service, please access the host where the", action))
+	sendEvent("status", "actual service is running.")
+
+	return fmt.Errorf("%s is not supported for Traefik services - these are external services managed outside this dashboard", action)
 }

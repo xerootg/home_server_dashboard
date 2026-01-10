@@ -93,6 +93,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/services", protect(handlers.ServicesHandler))
 	s.mux.HandleFunc("/api/logs", protect(handlers.DockerLogsHandler))
 	s.mux.HandleFunc("/api/logs/systemd", protect(handlers.SystemdLogsHandler))
+	s.mux.HandleFunc("/api/logs/traefik", protect(handlers.TraefikLogsHandler))
 	s.mux.HandleFunc("/api/bangAndPipeToRegex", protect(handlers.BangAndPipeHandler))
 	s.mux.HandleFunc("/api/docs/bangandpipe", protect(handlers.BangAndPipeDocsHandler))
 

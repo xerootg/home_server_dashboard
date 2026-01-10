@@ -103,6 +103,28 @@ function renderTraefikURLs(traefikURLs) {
     }).join('');
 }
 
+// getSourceIcons returns HTML for source icons based on service's primary source and traefik integration
+function getSourceIcons(service) {
+    let icons = '';
+    
+    // Primary source icon
+    if (service.source === 'systemd') {
+        icons += '<i class="bi bi-gear-fill text-info" title="systemd"></i>';
+    } else if (service.source === 'traefik') {
+        icons += '<i class="bi bi-signpost-split text-warning" title="Traefik"></i>';
+    } else {
+        // Docker is default
+        icons += '<i class="bi bi-box text-primary" title="Docker"></i>';
+    }
+    
+    // If service has traefik integration (not pure traefik source), show traefik icon too
+    if (service.source !== 'traefik' && service.traefik_urls && service.traefik_urls.length > 0) {
+        icons += '<i class="bi bi-signpost-split text-warning ms-1" title="Exposed via Traefik"></i>';
+    }
+    
+    return icons;
+}
+
 function renderServices(services, updateStats = true) {
     // Close any open logs first
     closeLogs();
@@ -118,6 +140,7 @@ function renderServices(services, updateStats = true) {
     let stopped = 0;
     let dockerCount = 0;
     let systemdCount = 0;
+    let traefikCount = 0;
 
     // Count all services for stats (use allServices for accurate counts)
     const statsSource = updateStats ? services : allServices;
@@ -131,21 +154,30 @@ function renderServices(services, updateStats = true) {
             dockerCount++;
         } else if (service.source === 'systemd') {
             systemdCount++;
+        } else if (service.source === 'traefik') {
+            traefikCount++;
+        }
+        // Also count services with Traefik integration (not pure traefik source)
+        if (service.source !== 'traefik' && service.traefik_urls && service.traefik_urls.length > 0) {
+            traefikCount++;
         }
     });
 
     const rows = services.map(service => {
         const statusClass = getStatusClass(service.state, service.status);
-        const sourceIcon = service.source === 'systemd' ? '<i class="bi bi-gear-fill text-info" title="systemd"></i>' : '<i class="bi bi-box text-primary" title="Docker"></i>';
+        const sourceIcons = getSourceIcons(service);
         const hostBadge = service.host ? `<span class="badge bg-secondary">${escapeHtml(service.host)}</span>` : '';
         const portsHtml = renderPorts(service.ports, service.host_ip);
         const traefikHtml = renderTraefikURLs(service.traefik_urls);
         const descriptionHtml = service.description ? `<div class="service-description text-muted small">${escapeHtml(service.description)}</div>` : '';
         const controlButtons = renderControlButtons(service);
 
+        // Track if service has traefik integration for filtering
+        const hasTraefikIntegration = service.traefik_urls && service.traefik_urls.length > 0;
+
         return `
-            <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}" data-project="${escapeHtml(service.project || '')}">
-                <td>${sourceIcon} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}${descriptionHtml}</td>
+            <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}" data-project="${escapeHtml(service.project || '')}" data-has-traefik="${hasTraefikIntegration}">
+                <td>${sourceIcons} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}${descriptionHtml}</td>
                 <td>${escapeHtml(service.project)}</td>
                 <td>${hostBadge}</td>
                 <td><code class="small">${escapeHtml(service.container_name)}</code></td>
@@ -176,6 +208,7 @@ function renderServices(services, updateStats = true) {
         document.getElementById('stoppedCount').textContent = stopped;
         document.getElementById('dockerCount').innerHTML = '<i class="bi bi-box text-primary"></i> ' + dockerCount;
         document.getElementById('systemdCount').innerHTML = '<i class="bi bi-gear-fill text-info"></i> ' + systemdCount;
+        document.getElementById('traefikCount').innerHTML = '<i class="bi bi-signpost-split text-warning"></i> ' + traefikCount;
     }
 }
 
@@ -270,7 +303,17 @@ function applyFilter() {
     
     // Apply source filter
     if (activeSourceFilter) {
-        services = services.filter(service => service.source === activeSourceFilter);
+        services = services.filter(service => {
+            // For traefik filter, include services that either:
+            // 1. Have traefik as primary source
+            // 2. Have traefik integration (non-empty traefik_urls)
+            if (activeSourceFilter === 'traefik') {
+                return service.source === 'traefik' || 
+                       (service.traefik_urls && service.traefik_urls.length > 0);
+            }
+            // For docker/systemd, just match by primary source
+            return service.source === activeSourceFilter;
+        });
     }
     
     // Apply table search filter
@@ -470,6 +513,8 @@ function toggleLogs(row) {
     let url;
     if (source === 'systemd') {
         url = '/api/logs/systemd?unit=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
+    } else if (source === 'traefik') {
+        url = '/api/logs/traefik?service=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
     } else {
         url = '/api/logs?container=' + encodeURIComponent(containerName) + '&service=' + encodeURIComponent(serviceName);
     }
