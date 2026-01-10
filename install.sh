@@ -123,6 +123,21 @@ log_info "Installing systemd service to ${SERVICE_PATH}..."
 sed "s/@@SERVICE_USER@@/${SERVICE_USER}/g" "${SOURCE_DIR}/${SERVICE_NAME}" > "${SERVICE_PATH}"
 chmod 644 "${SERVICE_PATH}"
 
+# Step 6.5: Generate and install polkit rules for local systemd service control
+POLKIT_RULES_DIR="/etc/polkit-1/rules.d"
+POLKIT_RULES_PATH="${POLKIT_RULES_DIR}/50-home-server-dashboard.rules"
+
+if [[ -d "${POLKIT_RULES_DIR}" ]]; then
+    log_info "Generating polkit rules for systemd service control..."
+    # Use the installed binary to generate polkit rules
+    "${BINARY_PATH}" -generate-polkit -user "${SERVICE_USER}" > "${POLKIT_RULES_PATH}"
+    chmod 644 "${POLKIT_RULES_PATH}"
+    log_info "Polkit rules installed to ${POLKIT_RULES_PATH}"
+else
+    log_warn "Polkit rules directory not found (${POLKIT_RULES_DIR})"
+    log_warn "Systemd service control may not work. Install polkit to enable this feature."
+fi
+
 # Step 7: Reload systemd and enable service
 log_info "Enabling ${SERVICE_NAME}..."
 systemctl daemon-reload

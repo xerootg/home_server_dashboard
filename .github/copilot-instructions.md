@@ -27,6 +27,12 @@ home_server_dashboard/
 │   ├── lexer.go                   # Tokenizer for expression parsing
 │   ├── parser.go                  # Recursive descent parser for expressions
 │   └── query_test.go              # Comprehensive parser tests
+├── polkit/
+│   ├── polkit.go                  # Polkit rules generator for local systemd control
+│   └── polkit_test.go             # Polkit generator tests
+├── sudoers/
+│   ├── sudoers.go                 # Sudoers config generator for remote systemd control
+│   └── sudoers_test.go            # Sudoers generator tests
 ├── services/
 │   ├── service.go                 # Common Service interface and ServiceInfo type
 │   ├── service_test.go            # ServiceInfo serialization tests
@@ -312,10 +318,23 @@ services:
 ```
 
 **Systemd Integration (`services/systemd/systemd.go`):**
-- Local: Uses D-Bus via `dbus.NewSystemConnectionContext()` and `ListUnitsContext()`
-- Remote: Uses SSH to run `systemctl show <unit> --property=ActiveState,SubState,LoadState,Description`
+- **Querying:** Local uses D-Bus via `dbus.NewSystemConnectionContext()` and `ListUnitsContext()`
+- **Querying:** Remote uses SSH to run `systemctl show <unit> --property=ActiveState,SubState,LoadState,Description`
+- **Service Control (Local):** Uses D-Bus `StartUnitContext()`, `StopUnitContext()`, `RestartUnitContext()` with polkit authorization
+- **Service Control (Remote):** Uses SSH with sudo to run `systemctl start/stop/restart`
 - Fetches unit description from systemd's `Description` property
 - Filters units by exact name match from config
+
+**Polkit Authorization (`polkit/polkit.go`):**
+- Generates polkit rules for local systemd service control via D-Bus
+- Required because the dashboard runs with `NoNewPrivileges=true` which prevents sudo
+- Output installed to `/etc/polkit-1/rules.d/50-home-server-dashboard.rules`
+- Allows the dashboard user to start/stop/restart configured units without sudo
+
+**Sudoers Configuration (`sudoers/sudoers.go`):**
+- Generates sudoers configuration for **remote** systemd service control only
+- Local hosts use polkit + D-Bus instead (sudoers doesn't work with NoNewPrivileges)
+- Output can be installed to `/etc/sudoers.d/home-server-dashboard` on remote hosts
 
 ## Frontend
 

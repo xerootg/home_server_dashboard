@@ -9,6 +9,7 @@ import (
 	"os/user"
 
 	"home_server_dashboard/config"
+	"home_server_dashboard/polkit"
 	"home_server_dashboard/server"
 	"home_server_dashboard/sudoers"
 )
@@ -24,8 +25,11 @@ func getConfigPath() string {
 
 func main() {
 	// Parse command line flags
-	generateSudoersFlag := flag.Bool("generate-sudoers", false, "Generate sudoers configuration for systemd services and exit")
-	sudoersUser := flag.String("sudoers-user", "", "Username for sudoers file (defaults to current user)")
+	generateSudoersFlag := flag.Bool("generate-sudoers", false, "Generate sudoers configuration for remote systemd services and exit")
+	generatePolkitFlag := flag.Bool("generate-polkit", false, "Generate polkit rules for local systemd services and exit")
+	authUser := flag.String("user", "", "Username for sudoers/polkit files (defaults to current user)")
+	// Keep old flag name for backwards compatibility
+	sudoersUser := flag.String("sudoers-user", "", "Deprecated: use -user instead")
 	flag.Parse()
 
 	// Load configuration
@@ -35,22 +39,43 @@ func main() {
 		log.Fatalf("Failed to load configuration from %s: %v", configPath, err)
 	}
 
-	// Handle sudoers generation
-	if *generateSudoersFlag {
-		username := *sudoersUser
-		if username == "" {
-			currentUser, err := user.Current()
-			if err != nil {
-				log.Fatalf("Failed to get current user: %v", err)
+	// Determine username for auth files
+	username := *authUser
+	if username == "" {
+		username = *sudoersUser // Fallback to old flag
+	}
+	if username == "" {
+		currentUser, err := user.Current()
+		if err != nil {
+			log.Fatalf("Failed to get current user: %v", err)
+		}
+		username = currentUser.Username
+	}
+
+	// Handle polkit generation
+	if *generatePolkitFlag {
+		// Convert config hosts to polkit.HostServices
+		hosts := make([]polkit.HostServices, len(cfg.Hosts))
+		for i, host := range cfg.Hosts {
+			hosts[i] = polkit.HostServices{
+				Name:     host.Name,
+				Address:  host.Address,
+				Services: host.SystemdServices,
 			}
-			username = currentUser.Username
 		}
 
+		fmt.Print(polkit.GeneratePolkitRules(hosts, username))
+		os.Exit(0)
+	}
+
+	// Handle sudoers generation
+	if *generateSudoersFlag {
 		// Convert config hosts to sudoers.HostServices
 		hosts := make([]sudoers.HostServices, len(cfg.Hosts))
 		for i, host := range cfg.Hosts {
 			hosts[i] = sudoers.HostServices{
 				Name:     host.Name,
+				Address:  host.Address,
 				Services: host.SystemdServices,
 			}
 		}

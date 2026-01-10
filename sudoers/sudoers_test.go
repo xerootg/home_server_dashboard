@@ -7,29 +7,46 @@ import (
 
 func TestGenerate_NoServices(t *testing.T) {
 	hosts := []HostServices{
-		{Name: "host1", Services: nil},
-		{Name: "host2", Services: []string{}},
+		{Name: "host1", Address: "192.168.1.1", Services: nil},
+		{Name: "host2", Address: "192.168.1.2", Services: []string{}},
 	}
 
 	result := Generate(hosts, "testuser")
 
-	if !strings.Contains(result, "# No systemd services configured") {
-		t.Error("Expected 'no services' message in output")
+	if !strings.Contains(result, "# No remote systemd services configured") {
+		t.Error("Expected 'no remote services' message in output")
 	}
 }
 
 func TestGenerate_EmptyHosts(t *testing.T) {
 	result := Generate(nil, "testuser")
 
-	if !strings.Contains(result, "# No systemd services configured") {
-		t.Error("Expected 'no services' message in output")
+	if !strings.Contains(result, "# No remote systemd services configured") {
+		t.Error("Expected 'no remote services' message in output")
 	}
 }
 
-func TestGenerate_WithServices(t *testing.T) {
+func TestGenerate_OnlyLocalServices(t *testing.T) {
 	hosts := []HostServices{
-		{Name: "nas", Services: []string{"docker.service", "ollama.service"}},
-		{Name: "remote", Services: []string{"nginx.service"}},
+		{Name: "nas", Address: "localhost", Services: []string{"docker.service"}},
+		{Name: "local", Address: "127.0.0.1", Services: []string{"nginx.service"}},
+	}
+
+	result := Generate(hosts, "myuser")
+
+	// Local services should not generate sudoers rules
+	if !strings.Contains(result, "# No remote systemd services configured") {
+		t.Error("Expected 'no remote services' message when only local hosts")
+	}
+	if strings.Contains(result, "myuser ALL=") {
+		t.Error("Should not generate sudoers rules for local hosts")
+	}
+}
+
+func TestGenerate_WithRemoteServices(t *testing.T) {
+	hosts := []HostServices{
+		{Name: "remote1", Address: "192.168.1.100", Services: []string{"docker.service", "ollama.service"}},
+		{Name: "remote2", Address: "nas.local", Services: []string{"nginx.service"}},
 	}
 
 	result := Generate(hosts, "myuser")
@@ -39,12 +56,17 @@ func TestGenerate_WithServices(t *testing.T) {
 		t.Error("Expected header in output")
 	}
 
-	// Check host comments
-	if !strings.Contains(result, "# Host: nas") {
-		t.Error("Expected host comment for nas")
+	// Check note about remote only
+	if !strings.Contains(result, "only needed for REMOTE hosts") {
+		t.Error("Expected note about remote hosts")
 	}
-	if !strings.Contains(result, "# Host: remote") {
-		t.Error("Expected host comment for remote")
+
+	// Check host comments include address
+	if !strings.Contains(result, "# Host: remote1 (192.168.1.100)") {
+		t.Error("Expected host comment with address for remote1")
+	}
+	if !strings.Contains(result, "# Host: remote2 (nas.local)") {
+		t.Error("Expected host comment with address for remote2")
 	}
 
 	// Check service rules for docker.service
@@ -66,31 +88,49 @@ func TestGenerate_WithServices(t *testing.T) {
 
 func TestGenerate_MixedHosts(t *testing.T) {
 	hosts := []HostServices{
-		{Name: "with-services", Services: []string{"foo.service"}},
-		{Name: "no-services", Services: nil},
-		{Name: "also-services", Services: []string{"bar.service"}},
+		{Name: "local", Address: "localhost", Services: []string{"local.service"}},
+		{Name: "remote", Address: "192.168.1.100", Services: []string{"remote.service"}},
+		{Name: "local2", Address: "127.0.0.1", Services: []string{"local2.service"}},
 	}
 
 	result := Generate(hosts, "admin")
 
-	// Should have rules for hosts with services
-	if !strings.Contains(result, "# Host: with-services") {
-		t.Error("Expected host comment for with-services")
+	// Should have rules for remote host
+	if !strings.Contains(result, "# Host: remote (192.168.1.100)") {
+		t.Error("Expected host comment for remote")
 	}
-	if !strings.Contains(result, "# Host: also-services") {
-		t.Error("Expected host comment for also-services")
-	}
-
-	// Should NOT have comment for host without services
-	if strings.Contains(result, "# Host: no-services") {
-		t.Error("Should not have host comment for no-services")
+	if !strings.Contains(result, "admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl start remote.service") {
+		t.Error("Expected start rule for remote.service")
 	}
 
-	// Should have the service rules
-	if !strings.Contains(result, "admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl start foo.service") {
-		t.Error("Expected start rule for foo.service")
+	// Should NOT have rules for local hosts
+	if strings.Contains(result, "# Host: local") {
+		t.Error("Should not have host comment for local")
 	}
-	if !strings.Contains(result, "admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl start bar.service") {
-		t.Error("Expected start rule for bar.service")
+	if strings.Contains(result, "local.service") {
+		t.Error("Should not have rules for local.service")
+	}
+	if strings.Contains(result, "local2.service") {
+		t.Error("Should not have rules for local2.service")
+	}
+}
+
+func TestIsLocal(t *testing.T) {
+	tests := []struct {
+		address string
+		isLocal bool
+	}{
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"192.168.1.1", false},
+		{"nas.local", false},
+		{"remote.example.com", false},
+	}
+
+	for _, tt := range tests {
+		h := HostServices{Address: tt.address}
+		if h.IsLocal() != tt.isLocal {
+			t.Errorf("Address %q: expected IsLocal()=%v, got %v", tt.address, tt.isLocal, h.IsLocal())
+		}
 	}
 }

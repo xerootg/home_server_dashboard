@@ -62,6 +62,15 @@ else
     log_warn "Systemd unit ${SERVICE_PATH} not found, skipping"
 fi
 
+# Step 3.5: Remove polkit rules
+POLKIT_RULES_PATH="/etc/polkit-1/rules.d/50-home-server-dashboard.rules"
+if [[ -f "${POLKIT_RULES_PATH}" ]]; then
+    log_info "Removing polkit rules ${POLKIT_RULES_PATH}..."
+    rm "${POLKIT_RULES_PATH}"
+else
+    log_warn "Polkit rules ${POLKIT_RULES_PATH} not found, skipping"
+fi
+
 # Step 4: Remove the binary
 if [[ -f "${BINARY_PATH}" ]]; then
     log_info "Removing binary ${BINARY_PATH}..."

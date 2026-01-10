@@ -25,6 +25,8 @@
 | Support extracting hostnames with HostRegexp, where one or more top level conditions is Host(). log the issue again if the matcher changes, and if there is no error, and previously was, log that and the result as well | ✅ Done |
 | support searching by hostname and port in the global search bar | ✅ Done |
 | critical services, as defined in services.json, should be monitored for crashing. in the case of docker, if docker is not handling it via healthcheck/restart:always(or whatever), then bounce that service. systemd services should be started if stopped and there is no defined retry policy. all logs from this should be logged in stdout as well as /var/log/home_server_dashboard.log | ⬜ |
+| docker services can fill the disk with logs. we should be able to inspect the size of logs and delete specific logs by truncating the file. | ⬜ |
+| polkit rules should be used for remote hosts too | ⬜ |
 | support getting status of services registered in traefik but not in systemd/docker. examples are an external service that is reverse proxied to a host matcher. | ⬜ |
 | email should be sent to contacts as defined in services.json | ⬜ |
 | port should be defined, optionally as well as ip, from services.json | ⬜ |

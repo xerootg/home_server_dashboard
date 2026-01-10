@@ -363,17 +363,61 @@ func (s *SystemdService) Restart(ctx context.Context) error {
 }
 
 // runSystemctl runs a systemctl command on the unit.
-// Requires sudo access for the user running the dashboard.
-// See README.md for sudoers configuration.
+// For local units, uses D-Bus directly (requires polkit authorization).
+// For remote units, uses SSH with sudo (requires sudoers configuration).
 func (s *SystemdService) runSystemctl(ctx context.Context, action string) error {
-	var cmd *exec.Cmd
-
 	if s.isLocal {
-		cmd = exec.CommandContext(ctx, "sudo", "systemctl", action, s.unitName)
-	} else {
-		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-			s.address, "sudo", "systemctl", action, s.unitName)
+		return s.runLocalSystemctl(ctx, action)
 	}
+	return s.runRemoteSystemctl(ctx, action)
+}
+
+// runLocalSystemctl uses D-Bus to control a local systemd unit.
+// This avoids the NoNewPrivileges restriction when using sudo.
+// Authorization is handled by polkit rules.
+func (s *SystemdService) runLocalSystemctl(ctx context.Context, action string) error {
+	conn, err := dbus.NewSystemConnectionContext(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to systemd: %w", err)
+	}
+	defer conn.Close()
+
+	// resultChan receives the job path when the action completes
+	resultChan := make(chan string, 1)
+
+	switch action {
+	case "start":
+		_, err = conn.StartUnitContext(ctx, s.unitName, "replace", resultChan)
+	case "stop":
+		_, err = conn.StopUnitContext(ctx, s.unitName, "replace", resultChan)
+	case "restart":
+		_, err = conn.RestartUnitContext(ctx, s.unitName, "replace", resultChan)
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to %s unit: %w", action, err)
+	}
+
+	// Wait for the job to complete
+	select {
+	case result := <-resultChan:
+		if result != "done" && result != "skipped" {
+			return fmt.Errorf("job failed with result: %s", result)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	return nil
+}
+
+// runRemoteSystemctl uses SSH with sudo to control a remote systemd unit.
+// Requires sudoers configuration on the remote host.
+func (s *SystemdService) runRemoteSystemctl(ctx context.Context, action string) error {
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+		s.address, "sudo", "systemctl", action, s.unitName)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
