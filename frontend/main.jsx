@@ -8,7 +8,7 @@ import { renderServices, updateServiceRow, renderHostFilters } from './render.js
 import { toggleFilter, toggleSourceFilter, toggleHostFilter, toggleSort, applyFilter, updateHostFilterUI } from './filter.js';
 import { toggleLogs, closeLogs, onLogsSearchInput, onLogsSearchKeydown, toggleLogsSearchMode, toggleLogsCaseSensitivity, toggleLogsRegex, toggleLogsBangAndPipe, navigateMatch } from './logs.js';
 import { onTableSearchInput, onTableSearchKeydown, clearTableSearch, toggleTableCaseSensitivity, toggleTableRegex, toggleTableBangAndPipe, toggleTableSearchMode, navigateTableMatch, updateTableBangPipeToggleUI } from './table-search.js';
-import { confirmServiceAction, executeServiceAction } from './actions.js';
+import { confirmServiceAction, executeServiceAction, confirmLogFlush, executeLogFlush } from './actions.js';
 import { loadServices, checkAuthStatus, logout } from './api.js';
 import { showHelpModal } from './help.js';
 import { scrollToService } from './services.js';
@@ -55,6 +55,10 @@ if (typeof window !== 'undefined') {
         // Service actions
         confirmServiceAction,
         executeServiceAction: () => executeServiceAction(doLoadServices),
+        
+        // Log flush actions
+        confirmLogFlush,
+        executeLogFlush: () => executeLogFlush(doLoadServices),
         
         // Help
         showHelpModal,

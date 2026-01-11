@@ -72,6 +72,32 @@ describe('sortServices', () => {
         assertEqual(sorted[2].status, 'stopped');
     });
 
+    it('sorts by log_size ascending', () => {
+        const servicesWithLogs = [
+            { name: 'small', log_size: 100 },
+            { name: 'large', log_size: 1000000 },
+            { name: 'medium', log_size: 5000 },
+            { name: 'none' }
+        ];
+        const sorted = sortServices([...servicesWithLogs], 'log_size', 'asc');
+        assertEqual(sorted[0].name, 'none');
+        assertEqual(sorted[1].name, 'small');
+        assertEqual(sorted[2].name, 'medium');
+        assertEqual(sorted[3].name, 'large');
+    });
+
+    it('sorts by log_size descending', () => {
+        const servicesWithLogs = [
+            { name: 'small', log_size: 100 },
+            { name: 'large', log_size: 1000000 },
+            { name: 'none' }
+        ];
+        const sorted = sortServices([...servicesWithLogs], 'log_size', 'desc');
+        assertEqual(sorted[0].name, 'large');
+        assertEqual(sorted[1].name, 'small');
+        assertEqual(sorted[2].name, 'none');
+    });
+
     it('handles empty array', () => {
         const sorted = sortServices([], 'name', 'asc');
         assertEqual(sorted.length, 0);

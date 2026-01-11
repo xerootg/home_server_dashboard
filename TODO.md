@@ -26,12 +26,12 @@
 | support searching by hostname and port in the global search bar | ✅ Done |
 | add gotift status updates for services. send a notification when a service goes offline or a host is unreachable. this should be event driven, not polled. | ✅ Done |
 | critical services, as defined in services.json, should be monitored for crashing. in the case of docker, if docker is not handling it via healthcheck/restart:always(or whatever), then bounce that service. systemd services should be started if stopped and there is no defined retry policy. all logs from this should be logged in stdout as well as /var/log/home_server_dashboard.log | ⬜ |
-| docker services can fill the disk with logs. we should be able to inspect the size of logs and delete specific logs by truncating the file. | ⬜ |
-| polkit rules should be used for remote hosts too | ⬜ |
+| docker services can fill the disk with logs. we should be able to inspect the size of logs and delete specific logs by truncating the file. | ✅ Done |
+| polkit rules should be used for remote hosts too - OR a remote client, the security risks of not having polkit and capacity/file restrictions via systemd is too high to leave alone. i suspect a remote client/daemon is going to be the only way with exceptions for homeassistant and traefik (REST only services... in theory, ha is wide open with the ssh extension turned on)| ⬜ |
 | support getting status of services registered in traefik but not in systemd/docker. examples are an external service that is reverse proxied to a host matcher. | ✅ Done |
 | add homeassistant status, allow restarting (including rebooting), updating | ✅ Done |
 | email should be sent to contacts as defined in services.json | ⬜ |
-| port should be defined, optionally as well as ip, from services.json | ⬜ |
+| port should be defined, optionally as well as ip, from services.json or environment variable | ⬜ |
 | a pipeline (github actions) that runs on every push which runs the tests, including integration (docker, systemd) | ⬜ |
 | implement pub/sub for updates instead of depending on browser polling, use https://github.com/gorilla/websocket to publish updates. setup a system to monitor for state changes in go, and refactor the frontend to dynamically handle these events. | ✅ Done |
 | Add security, using OIDC. Any user which has the admin claim can use this app. all endpoints will need to accept a token, which will need to be plumbed through to some central server-side context to verify the user is logged in | ✅ Done |

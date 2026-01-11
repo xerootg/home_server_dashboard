@@ -1019,6 +1019,29 @@ th.sortable:hover {
     box-shadow: 0 0 8px rgba(52, 152, 219, 0.4);
 }
 
+.service-control-btn.btn-logs {
+    background: rgba(155, 89, 182, 0.2);
+    color: #9b59b6;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+}
+
+.service-control-btn.btn-logs:hover {
+    background: rgba(155, 89, 182, 0.4);
+    box-shadow: 0 0 8px rgba(155, 89, 182, 0.4);
+}
+
+.service-control-btn.btn-logs-readonly {
+    cursor: default;
+    opacity: 0.8;
+}
+
+.service-control-btn.btn-logs-readonly:hover {
+    transform: none;
+    box-shadow: none;
+    background: rgba(155, 89, 182, 0.2);
+}
+
 /* Action Modal Styles */
 .action-status-container {
     margin-top: 16px;

@@ -73,6 +73,10 @@ export function sortServices(services, column, direction) {
                 valueA = a.image.toLowerCase();
                 valueB = b.image.toLowerCase();
                 break;
+            case 'log_size':
+                valueA = a.log_size || 0;
+                valueB = b.log_size || 0;
+                break;
             default:
                 return 0;
         }

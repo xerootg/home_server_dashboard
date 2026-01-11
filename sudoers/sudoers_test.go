@@ -134,3 +134,25 @@ func TestIsLocal(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateDockerLogTruncate(t *testing.T) {
+	result := GenerateDockerLogTruncate("dashboard")
+
+	// Check header
+	if !strings.Contains(result, "# Home Server Dashboard sudoers configuration for Docker log truncation") {
+		t.Error("Expected Docker log truncation header in output")
+	}
+
+	// Check that it allows truncate command
+	if !strings.Contains(result, "dashboard ALL=(ALL) NOPASSWD: /usr/bin/truncate -s 0 /var/lib/docker/containers/*/*.log") {
+		t.Error("Expected truncate command with wildcard pattern for Docker logs")
+	}
+}
+
+func TestGenerateDockerLogTruncate_DifferentUser(t *testing.T) {
+	result := GenerateDockerLogTruncate("myuser")
+
+	if !strings.Contains(result, "myuser ALL=(ALL) NOPASSWD:") {
+		t.Error("Expected rules for specified username")
+	}
+}

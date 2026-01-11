@@ -24,13 +24,12 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
 ReadOnlyPaths=/
-ReadWritePaths=/var/log /run/faillock
+ReadWritePaths=/var/log /run/faillock /var/lib/docker/containers
 
-# PAM authentication requires reading /etc/shadow
-# Grant capability to bypass file permissions for reading (needed because
-# NoNewPrivileges blocks the unix_chkpwd setuid helper)
-AmbientCapabilities=CAP_DAC_READ_SEARCH
-CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+# PAM authentication requires reading /etc/shadow (CAP_DAC_READ_SEARCH)
+# Docker log truncation requires bypassing file permissions (CAP_DAC_OVERRIDE)
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 
 # Allow access to Docker socket
 SupplementaryGroups=docker

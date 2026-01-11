@@ -3,9 +3,9 @@
  */
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from './test-utils.mjs';
-import { servicesState } from './state.js';
+import { servicesState, authState } from './state.js';
 import { getServiceHostIP } from './services.js';
-import { renderPorts, renderTraefikURLs, getSourceIcons, renderControlButtons, getUniqueHosts } from './render.js';
+import { renderPorts, renderTraefikURLs, getSourceIcons, renderControlButtons, renderLogSize, getUniqueHosts } from './render.js';
 
 describe('getServiceHostIP', () => {
     it('returns host_ip for matching service', () => {
@@ -231,6 +231,47 @@ describe('renderControlButtons', () => {
         const result = renderControlButtons(service);
         assert(result.includes('btn-restart'), 'Should include restart button');
         assert(result.includes('bi-arrow-clockwise'), 'Should include restart icon');
+    });
+});
+
+describe('renderLogSize', () => {
+    it('returns dash for non-docker services', () => {
+        const service = { source: 'systemd', log_size: 1000 };
+        const result = renderLogSize(service);
+        assert(result.includes('-'), 'Should show dash');
+        assert(result.includes('text-muted'), 'Should be muted');
+    });
+
+    it('returns dash for docker services without log_size', () => {
+        const service = { source: 'docker', container_name: 'test', name: 'test', host: 'host1' };
+        const result = renderLogSize(service);
+        assert(result.includes('-'), 'Should show dash');
+    });
+
+    it('returns dash for docker services with zero log_size', () => {
+        const service = { source: 'docker', log_size: 0, container_name: 'test', name: 'test', host: 'host1' };
+        const result = renderLogSize(service);
+        assert(result.includes('-'), 'Should show dash');
+    });
+
+    it('renders readonly button for non-admin users', () => {
+        authState.status = { user: { is_admin: false } };
+        const service = { source: 'docker', log_size: 1024, container_name: 'test', name: 'test', host: 'host1' };
+        const result = renderLogSize(service);
+        assert(result.includes('btn-logs-readonly'), 'Should have readonly class');
+        assert(result.includes('1.00K'), 'Should show formatted size');
+        assert(!result.includes('confirmLogFlush'), 'Should not have onclick handler');
+    });
+
+    it('renders clickable button for admin users', () => {
+        authState.status = { user: { is_admin: true } };
+        const service = { source: 'docker', log_size: 1048576, container_name: 'test-container', name: 'test-service', host: 'host1' };
+        const result = renderLogSize(service);
+        assert(!result.includes('btn-logs-readonly'), 'Should not have readonly class');
+        assert(result.includes('btn-logs'), 'Should have logs button class');
+        assert(result.includes('1.00M'), 'Should show formatted size');
+        assert(result.includes('confirmLogFlush'), 'Should have onclick handler');
+        assert(result.includes('test-container'), 'Should include container name');
     });
 });
 

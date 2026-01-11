@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -114,6 +115,9 @@ func (p *Provider) GetServicesWithRemaps(ctx context.Context) ([]services.Servic
 		// Extract Traefik service name if explicitly defined in labels
 		traefikServiceName := extractTraefikServiceName(ctr.Labels)
 
+		// Get log file size by inspecting container
+		logSize := p.getContainerLogSize(ctx, ctr.ID)
+
 		result = append(result, services.ServiceInfo{
 			Name:               service,
 			Project:            project,
@@ -127,10 +131,32 @@ func (p *Provider) GetServicesWithRemaps(ctx context.Context) ([]services.Servic
 			Description:        description,
 			Hidden:             hidden,
 			TraefikServiceName: traefikServiceName,
+			LogSize:            logSize,
 		})
 	}
 
 	return result, allRemaps
+}
+
+// getContainerLogSize gets the log file size for a container.
+// Returns 0 if the log file cannot be accessed.
+func (p *Provider) getContainerLogSize(ctx context.Context, containerID string) int64 {
+	inspect, err := p.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return 0
+	}
+
+	logPath := inspect.LogPath
+	if logPath == "" {
+		return 0
+	}
+
+	fi, err := os.Stat(logPath)
+	if err != nil {
+		return 0
+	}
+
+	return fi.Size()
 }
 
 // extractExposedPorts filters ports to only include those bound to non-localhost addresses.
@@ -296,6 +322,38 @@ func (p *Provider) GetLogs(ctx context.Context, containerName string, tailLines 
 
 	// Wrap with demultiplexer to strip Docker's 8-byte header
 	return &dockerLogReader{reader: bufio.NewReader(logs), closer: logs}, nil
+}
+
+// GetLogPath returns the path to the log file for a container.
+// Returns empty string if the container or log path cannot be found.
+func (p *Provider) GetLogPath(ctx context.Context, containerName string) (string, error) {
+	inspect, err := p.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+	return inspect.LogPath, nil
+}
+
+// TruncateLogs truncates the log file for a container.
+// This clears all logs for the container.
+// Requires CAP_DAC_OVERRIDE capability to bypass file permissions.
+func (p *Provider) TruncateLogs(ctx context.Context, containerName string) error {
+	logPath, err := p.GetLogPath(ctx, containerName)
+	if err != nil {
+		return err
+	}
+	if logPath == "" {
+		return fmt.Errorf("no log file found for container %s", containerName)
+	}
+
+	// Truncate the log file directly
+	// This works because the service runs with CAP_DAC_OVERRIDE capability
+	err = os.Truncate(logPath, 0)
+	if err != nil {
+		return fmt.Errorf("failed to truncate log file: %w", err)
+	}
+
+	return nil
 }
 
 // DockerService represents a single Docker container service.

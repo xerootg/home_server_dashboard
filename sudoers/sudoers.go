@@ -18,6 +18,28 @@ func (h HostServices) IsLocal() bool {
 	return h.Address == "localhost" || h.Address == "127.0.0.1"
 }
 
+// GenerateDockerLogTruncate creates a sudoers configuration for Docker log truncation.
+// This allows the dashboard user to truncate Docker container log files.
+// The output can be installed to /etc/sudoers.d/home-server-dashboard-docker.
+func GenerateDockerLogTruncate(username string) string {
+	var b strings.Builder
+
+	b.WriteString("# Home Server Dashboard sudoers configuration for Docker log truncation\n")
+	b.WriteString("# Generated for the dashboard service\n")
+	b.WriteString("#\n")
+	b.WriteString("# This allows the dashboard user to truncate Docker container log files.\n")
+	b.WriteString("#\n")
+	b.WriteString("# Install with:\n")
+	b.WriteString("#   sudo visudo -f /etc/sudoers.d/home-server-dashboard-docker\n")
+	b.WriteString("\n")
+
+	// Allow truncating any file in the Docker containers directory
+	// This is safe because truncate with -s 0 only clears file contents
+	b.WriteString(fmt.Sprintf("%s ALL=(ALL) NOPASSWD: /usr/bin/truncate -s 0 /var/lib/docker/containers/*/*.log\n", username))
+
+	return b.String()
+}
+
 // Generate creates a sudoers configuration string for the given hosts and username.
 // The output can be installed to /etc/sudoers.d/home-server-dashboard.
 // NOTE: For local hosts, use polkit rules instead (see polkit package).

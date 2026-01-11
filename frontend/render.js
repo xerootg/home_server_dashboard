@@ -2,8 +2,9 @@
  * Service rendering functions.
  */
 
-import { escapeHtml, getStatusClass } from './utils.js';
+import { escapeHtml, getStatusClass, formatLogSize } from './utils.js';
 import { getServiceHostIP, scrollToService } from './services.js';
+import { authState } from './state.js';
 
 /**
  * Render port badges for a service.
@@ -100,6 +101,14 @@ export function getSourceIcons(service) {
 }
 
 /**
+ * Check if the current user is an admin.
+ * @returns {boolean} True if user is admin
+ */
+export function isAdmin() {
+    return authState.status?.user?.is_admin === true;
+}
+
+/**
  * Render control buttons for a service.
  * @param {Object} service - The service object
  * @returns {string} HTML string of control buttons
@@ -129,6 +138,34 @@ export function renderControlButtons(service) {
 }
 
 /**
+ * Render the log size column for a service.
+ * @param {Object} service - The service object
+ * @returns {string} HTML string for log size column
+ */
+export function renderLogSize(service) {
+    const containerName = escapeHtml(service.container_name);
+    const serviceName = escapeHtml(service.name);
+    const host = escapeHtml(service.host || '');
+    const source = service.source || 'docker';
+    
+    // Only Docker services have log sizes
+    if (source !== 'docker' || !service.log_size || service.log_size <= 0) {
+        return '<span class="text-muted">-</span>';
+    }
+    
+    const logSizeFormatted = formatLogSize(service.log_size);
+    const userIsAdmin = isAdmin();
+    
+    if (userIsAdmin) {
+        // Admin users get clickable flush button
+        return `<button class="btn btn-sm btn-logs" onclick="window.__dashboard.confirmLogFlush(event, '${containerName}', '${serviceName}', '${host}')" title="Flush logs (${logSizeFormatted})"><i class="bi bi-file-earmark-x me-1"></i>${logSizeFormatted}</button>`;
+    } else {
+        // Non-admin users see log size but can't flush
+        return `<span class="btn btn-sm btn-logs btn-logs-readonly" title="Log size: ${logSizeFormatted}"><i class="bi bi-file-earmark-text me-1"></i>${logSizeFormatted}</span>`;
+    }
+}
+
+/**
  * Render the services table body.
  * @param {Array} services - Array of service objects
  * @param {boolean} updateStats - Whether to update stats counters
@@ -146,7 +183,7 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
     const tbody = document.getElementById('servicesTable');
     
     if (!services || services.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center">No services found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">No services found</td></tr>';
         return;
     }
 
@@ -185,6 +222,7 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
         const traefikHtml = renderTraefikURLs(service.traefik_urls);
         const descriptionHtml = service.description ? `<div class="service-description text-muted small">${escapeHtml(service.description)}</div>` : '';
         const controlButtons = renderControlButtons(service);
+        const logSizeHtml = renderLogSize(service);
         const hasTraefikIntegration = service.traefik_urls && service.traefik_urls.length > 0;
 
         return `
@@ -195,6 +233,7 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
                 <td><code class="small">${escapeHtml(service.container_name)}</code></td>
                 <td><span class="badge badge-${statusClass}">${escapeHtml(service.status)}</span></td>
                 <td class="image-cell" title="${escapeHtml(service.image)}">${escapeHtml(service.image)}</td>
+                <td class="logs-cell">${logSizeHtml}</td>
                 <td class="controls-cell">${controlButtons}</td>
             </tr>
         `;

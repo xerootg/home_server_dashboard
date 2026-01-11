@@ -1164,3 +1164,68 @@ func handleHomeAssistantAction(ctx context.Context, cfg *config.Config, req Serv
 		return fmt.Errorf("unknown action: %s", action)
 	}
 }
+
+// LogFlushRequest represents the request body for flushing logs.
+type LogFlushRequest struct {
+	ContainerName string `json:"container_name"`
+	ServiceName   string `json:"service_name"`
+	Host          string `json:"host"`
+}
+
+// LogFlushHandler handles POST /api/logs/flush requests for truncating Docker logs.
+// Only administrators can flush logs.
+func LogFlushHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check user permissions - only admins can flush logs
+	user := auth.GetUserFromContext(r.Context())
+	if user == nil || !user.IsAdmin {
+		http.Error(w, "Access denied: administrator privileges required to flush logs", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req LogFlushRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ContainerName == "" {
+		http.Error(w, "container_name is required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := config.Get()
+	localHostName := "localhost"
+	if cfg != nil {
+		localHostName = cfg.GetLocalHostName()
+	}
+
+	// Create Docker provider
+	dockerProvider, err := docker.NewProvider(localHostName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create Docker provider: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer dockerProvider.Close()
+
+	// Truncate logs
+	err = dockerProvider.TruncateLogs(r.Context(), req.ContainerName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to flush logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Admin %s flushed logs for container %s", user.Email, req.ContainerName)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("Logs flushed for %s", req.ContainerName),
+	})
+}

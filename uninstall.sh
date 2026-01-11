@@ -71,6 +71,24 @@ else
     log_warn "Polkit rules ${POLKIT_RULES_PATH} not found, skipping"
 fi
 
+# Step 3.6: Remove Docker sudoers rules
+DOCKER_SUDOERS_PATH="/etc/sudoers.d/home-server-dashboard-docker"
+if [[ -f "${DOCKER_SUDOERS_PATH}" ]]; then
+    log_info "Removing Docker sudoers rules ${DOCKER_SUDOERS_PATH}..."
+    sudo rm "${DOCKER_SUDOERS_PATH}"
+else
+    log_warn "Docker sudoers rules ${DOCKER_SUDOERS_PATH} not found, skipping"
+fi
+
+# Step 3.7: Remove log-truncate-helper
+LOG_HELPER_PATH="/usr/local/bin/log-truncate-helper"
+if [[ -f "${LOG_HELPER_PATH}" ]]; then
+    log_info "Removing log-truncate-helper ${LOG_HELPER_PATH}..."
+    sudo rm "${LOG_HELPER_PATH}"
+else
+    log_warn "Log truncate helper ${LOG_HELPER_PATH} not found, skipping"
+fi
+
 # Step 4: Remove the binary
 if [[ -f "${BINARY_PATH}" ]]; then
     log_info "Removing binary ${BINARY_PATH}..."

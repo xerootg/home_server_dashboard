@@ -156,8 +156,10 @@ home_server_dashboard/
   - `SystemdLogsHandler` — SSE stream for systemd unit logs (checks permissions)
   - `IndexHandler` — Serves the main dashboard page
   - `ServiceActionHandler` — Handles start/stop/restart actions with SSE status updates (checks permissions)
+  - `LogFlushHandler` — Truncates Docker container logs (admin only)
 - **Key Types:**
   - `ServiceActionRequest` — Request body for service control actions
+  - `LogFlushRequest` — Request body for log flush actions
 - **Internal:** `getAllServices()` aggregates services from all providers, `filterServicesForUser()` applies permission filtering
 
 ### `server` Package
@@ -534,6 +536,7 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 - `GET /api/logs?container=<name>` — SSE stream of Docker container logs
 - `GET /api/logs/systemd?unit=<name>&host=<host>` — SSE stream of systemd unit logs
 - `GET /api/logs/traefik?service=<name>&host=<host>` — SSE stream for Traefik (returns stub message, logs not supported)
+- `POST /api/logs/flush` — Truncate Docker container logs (admin only)
 - `GET /api/bangAndPipeToRegex?expr=<expr>` — Compiles Bang & Pipe expression to AST
 - `GET /api/docs/bangandpipe` — Returns rendered HTML documentation for Bang & Pipe syntax
 - `POST /api/services/start` — Start a service (SSE stream of status updates)
@@ -589,6 +592,7 @@ type ServiceInfo struct {
     TraefikServiceName string `json:"traefik_service_name,omitempty"` // Traefik service name from labels (if different from Name)
     Description   string     `json:"description"`             // Service description (from Docker label or systemd unit)
     Hidden        bool       `json:"hidden,omitempty"`        // If true, service should be hidden from UI
+    LogSize       int64      `json:"log_size,omitempty"`      // Size of log file in bytes (Docker only)
 }
 ```
 

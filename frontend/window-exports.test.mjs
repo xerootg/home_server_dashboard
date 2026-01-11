@@ -148,6 +148,8 @@ describe('Expected Window Exports', () => {
         'toggleTableBangAndPipe',
         'confirmServiceAction',
         'executeServiceAction',
+        'confirmLogFlush',
+        'executeLogFlush',
         'showHelpModal',
         'scrollToService',
         'logout',

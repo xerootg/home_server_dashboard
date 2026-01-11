@@ -252,3 +252,145 @@ export function closeActionModal() {
     // Clear pending action
     actionState.pending = null;
 }
+
+/**
+ * Show confirmation modal for log flush action.
+ * @param {Event} event - The click event
+ * @param {string} containerName - The container name
+ * @param {string} serviceName - The display service name
+ * @param {string} host - The host name
+ */
+export function confirmLogFlush(event, containerName, serviceName, host) {
+    event.stopPropagation();
+    
+    // Store pending action
+    actionState.pending = {
+        action: 'flush_logs',
+        containerName,
+        serviceName,
+        host
+    };
+    
+    // Update modal content
+    document.getElementById('actionModalLabel').innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning"></i> Confirm Log Flush';
+    document.getElementById('actionModalMessage').innerHTML = `
+        Are you sure you want to <strong>flush all logs</strong> for this container?<br>
+        <br>
+        <i class="bi bi-box text-primary"></i> <strong>${escapeHtml(serviceName)}</strong>
+        ${host ? `<span class="badge bg-secondary ms-2">${escapeHtml(host)}</span>` : ''}
+        <br><small class="text-warning mt-2 d-block"><i class="bi bi-exclamation-triangle"></i> This action cannot be undone. All logs will be permanently deleted.</small>
+    `;
+    
+    // Reset modal state
+    document.getElementById('actionModalStatus').style.display = 'none';
+    document.getElementById('actionStatusLog').innerHTML = '';
+    document.getElementById('actionCountdown').style.display = 'none';
+    document.getElementById('actionModalFooter').style.display = 'flex';
+    document.getElementById('actionSpinner').style.display = 'none';
+    
+    // Set up confirm button
+    const confirmBtn = document.getElementById('actionModalConfirm');
+    confirmBtn.className = 'btn btn-danger';
+    confirmBtn.textContent = 'Yes, flush logs';
+    confirmBtn.disabled = false;
+    confirmBtn.onclick = executeLogFlush;
+    
+    // Show modal
+    const modal = getActionModal();
+    if (modal) {
+        modal.show();
+    }
+}
+
+/**
+ * Execute the log flush action.
+ * @param {Function} doLoadServices - Callback to reload services after flush
+ */
+export function executeLogFlush(doLoadServices) {
+    if (!actionState.pending || actionState.pending.action !== 'flush_logs') return;
+    
+    const { containerName, serviceName, host } = actionState.pending;
+    
+    // Update UI to show progress
+    document.getElementById('actionModalStatus').style.display = 'block';
+    document.getElementById('actionModalFooter').style.display = 'none';
+    document.getElementById('actionSpinner').style.display = 'inline-block';
+    
+    const statusLog = document.getElementById('actionStatusLog');
+    statusLog.innerHTML = '';
+    addActionLogLine('Flushing logs...', 'status');
+    
+    // Make POST request
+    const requestBody = {
+        container_name: containerName,
+        service_name: serviceName,
+        host: host
+    };
+    
+    fetch('/api/logs/flush', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+    }).then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(text || `HTTP ${response.status}: ${response.statusText}`);
+            });
+        }
+        return response.json();
+    }).then(result => {
+        document.getElementById('actionSpinner').style.display = 'none';
+        addActionLogLine('✓ Logs flushed successfully', 'success');
+        
+        // Reload services to update log sizes
+        if (typeof doLoadServices === 'function') {
+            startCountdownWithCallback(doLoadServices);
+        } else {
+            startCountdown();
+        }
+    }).catch(err => {
+        document.getElementById('actionSpinner').style.display = 'none';
+        addActionLogLine('✗ ' + err.message, 'error');
+        showLogFlushRetry();
+    });
+}
+
+/**
+ * Show retry/close buttons after log flush failure.
+ */
+function showLogFlushRetry() {
+    const footer = document.getElementById('actionModalFooter');
+    footer.style.display = 'flex';
+    footer.innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-danger" onclick="window.__dashboard.executeLogFlush()">Retry</button>
+    `;
+}
+
+/**
+ * Start countdown and then close modal, with optional callback.
+ * @param {Function} callback - Optional callback to run after countdown
+ */
+function startCountdownWithCallback(callback) {
+    const countdownEl = document.getElementById('actionCountdown');
+    const valueEl = document.getElementById('countdownValue');
+    countdownEl.style.display = 'block';
+    
+    let count = 3;
+    valueEl.textContent = count;
+    
+    const interval = setInterval(() => {
+        count--;
+        valueEl.textContent = count;
+        
+        if (count <= 0) {
+            clearInterval(interval);
+            closeActionModal();
+            if (typeof callback === 'function') {
+                callback();
+            }
+        }
+    }, 1000);
+}

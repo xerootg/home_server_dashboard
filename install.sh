@@ -152,6 +152,11 @@ else
     log_warn "Systemd service control may not work. Install polkit to enable this feature."
 fi
 
+# Step 6.6: Docker log truncation
+# The service now uses CAP_DAC_OVERRIDE ambient capability to truncate Docker logs directly.
+# No helper binary is needed.
+log_info "Docker log truncation enabled via CAP_DAC_OVERRIDE capability"
+
 # Step 7: Reload systemd and enable service
 log_info "Enabling ${SERVICE_NAME}..."
 sudo systemctl daemon-reload

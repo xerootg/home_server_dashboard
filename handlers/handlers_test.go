@@ -10,10 +10,32 @@ import (
 	"strings"
 	"testing"
 
+	"home_server_dashboard/auth"
 	"home_server_dashboard/config"
 	"home_server_dashboard/services"
 	"home_server_dashboard/services/docker"
 )
+
+// authUserContextKey is the context key used by auth package for storing user
+var authUserContextKey = auth.UserContextKey
+
+// testAdminUser is a mock admin user for testing
+var testAdminUser = auth.User{
+	ID:              "test-admin",
+	Email:           "admin@test.com",
+	Name:            "Test Admin",
+	IsAdmin:         true,
+	HasGlobalAccess: true,
+}
+
+// testNonAdminUser is a mock non-admin user for testing
+var testNonAdminUser = auth.User{
+	ID:              "test-user",
+	Email:           "user@test.com",
+	Name:            "Test User",
+	IsAdmin:         false,
+	HasGlobalAccess: false,
+}
 
 // setupTestConfig creates a temporary config file and loads it.
 func setupTestConfig(t *testing.T, configJSON string) func() {
@@ -861,5 +883,78 @@ func TestApplyPortRemaps_MultipleRemaps(t *testing.T) {
 		if port.TargetService != expectedTarget {
 			t.Errorf("gluetun port %d should have TargetService=%q, got %q", port.HostPort, expectedTarget, port.TargetService)
 		}
+	}
+}
+
+// TestLogFlushHandler_MethodNotAllowed tests that GET is rejected.
+func TestLogFlushHandler_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/flush", nil)
+	w := httptest.NewRecorder()
+
+	LogFlushHandler(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+// TestLogFlushHandler_RequiresAdmin tests that non-admin users are rejected.
+func TestLogFlushHandler_RequiresAdmin(t *testing.T) {
+	body := strings.NewReader(`{"container_name": "test", "service_name": "test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/logs/flush", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// No user in context (nil user)
+	LogFlushHandler(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	if !strings.Contains(w.Body.String(), "administrator privileges required") {
+		t.Errorf("Expected 'administrator privileges required' in body, got: %s", w.Body.String())
+	}
+}
+
+// TestLogFlushHandler_InvalidJSON tests that invalid JSON is rejected.
+func TestLogFlushHandler_InvalidJSON(t *testing.T) {
+	body := strings.NewReader(`{invalid json}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/logs/flush", body)
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Add admin user to context
+	ctx := context.WithValue(req.Context(), authUserContextKey, &testAdminUser)
+	req = req.WithContext(ctx)
+	
+	w := httptest.NewRecorder()
+
+	LogFlushHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestLogFlushHandler_MissingContainerName tests that container_name is required.
+func TestLogFlushHandler_MissingContainerName(t *testing.T) {
+	body := strings.NewReader(`{"service_name": "test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/logs/flush", body)
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Add admin user to context
+	ctx := context.WithValue(req.Context(), authUserContextKey, &testAdminUser)
+	req = req.WithContext(ctx)
+	
+	w := httptest.NewRecorder()
+
+	LogFlushHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status code = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(w.Body.String(), "container_name is required") {
+		t.Errorf("Expected 'container_name is required' in body, got: %s", w.Body.String())
 	}
 }
