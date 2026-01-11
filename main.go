@@ -38,8 +38,6 @@ func main() {
 	generateSudoersFlag := flag.Bool("generate-sudoers", false, "Generate sudoers configuration for remote systemd services and exit")
 	generatePolkitFlag := flag.Bool("generate-polkit", false, "Generate polkit rules for local systemd services and exit")
 	authUser := flag.String("user", "", "Username for sudoers/polkit files (defaults to current user)")
-	// Keep old flag name for backwards compatibility
-	sudoersUser := flag.String("sudoers-user", "", "Deprecated: use -user instead")
 	flag.Parse()
 
 	// Load configuration
@@ -51,9 +49,6 @@ func main() {
 
 	// Determine username for auth files
 	username := *authUser
-	if username == "" {
-		username = *sudoersUser // Fallback to old flag
-	}
 	if username == "" {
 		currentUser, err := user.Current()
 		if err != nil {
@@ -101,6 +96,7 @@ func main() {
 
 	// Create server config with embedded filesystems
 	serverCfg := server.DefaultConfig()
+	serverCfg.Port = fmt.Sprintf(":%d", cfg.GetPort())
 	staticFS, err := getStaticFS()
 	if err != nil {
 		log.Fatalf("Failed to get embedded static filesystem: %v", err)

@@ -489,6 +489,38 @@ func TestConfig_IsOIDCEnabled(t *testing.T) {
 	}
 }
 
+func TestConfig_GetPort(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected int
+	}{
+		{
+			name:     "returns default port when not set",
+			config:   Config{},
+			expected: 9001,
+		},
+		{
+			name:     "returns configured port",
+			config:   Config{Port: 8080},
+			expected: 8080,
+		},
+		{
+			name:     "returns default when port is zero",
+			config:   Config{Port: 0},
+			expected: 9001,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.GetPort(); got != tt.expected {
+				t.Errorf("GetPort() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestLoad_OIDCConfig(t *testing.T) {
 	tempDir := t.TempDir()
 

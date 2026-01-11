@@ -1,4 +1,6 @@
 {
+  // Dashboard HTTP server port (default 9001)
+  "port": 9001,
   "hosts": [
     {
       "name": "nas",

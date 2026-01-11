@@ -210,11 +210,21 @@ type Config struct {
 	OIDC   *OIDCConfig   `json:"oidc,omitempty"`
 	Local  *LocalConfig  `json:"local,omitempty"`
 	Gotify *GotifyConfig `json:"gotify,omitempty"`
+	// Port is the HTTP server port (default 9001).
+	Port int `json:"port,omitempty"`
 }
 
 // IsOIDCEnabled returns true if OIDC authentication is configured and enabled.
 func (c *Config) IsOIDCEnabled() bool {
 	return c.OIDC != nil && c.OIDC.ConfigURL != "" && c.OIDC.ClientID != ""
+}
+
+// GetPort returns the configured HTTP server port, or 9001 if not specified.
+func (c *Config) GetPort() int {
+	if c.Port == 0 {
+		return 9001
+	}
+	return c.Port
 }
 
 // GetLocalHostName returns the name of the localhost host config, or "localhost" if not found.

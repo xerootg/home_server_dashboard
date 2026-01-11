@@ -31,14 +31,19 @@
 | support getting status of services registered in traefik but not in systemd/docker. examples are an external service that is reverse proxied to a host matcher. | ✅ Done |
 | add homeassistant status, allow restarting (including rebooting), updating | ✅ Done |
 | email should be sent to contacts as defined in services.json | ⬜ |
-| port should be defined, optionally as well as ip, from services.json or environment variable | ⬜ |
+| port should be defined from services.json or environment variable | ⬜ |
 | a pipeline (github actions) that runs on every push which runs the tests, including integration (docker, systemd) | ⬜ |
 | implement pub/sub for updates instead of depending on browser polling, use https://github.com/gorilla/websocket to publish updates. setup a system to monitor for state changes in go, and refactor the frontend to dynamically handle these events. | ✅ Done |
 | Add security, using OIDC. Any user which has the admin claim can use this app. all endpoints will need to accept a token, which will need to be plumbed through to some central server-side context to verify the user is logged in | ✅ Done |
 | Add a security fallback, using PAM as the auth verification, as a failover when oauth is offline. issue a JWT which is valid for the PAM result. Members of the docker group have access. | ✅ Done |
-| run fail2ban or something infront of auth to block requests from abusive IPs | ⬜ |
 | create a group concept, where a user can see some subset of services, with limited API access to those services, such as start/stop for the services configured in the configuration file | ✅ Done |
 | filter by host, new row of slugs, all filters should be tristate - include, disinclude, exclusive. default is include | ✅ Done |
 | bangandpipe by default | ✅ Done |
 | global search supports jumping to containers by match and not just search collapsing non-matching services | ✅ Done |
 | I want to add a favorites icon, based on https://icons.getbootstrap.com/icons/hdd-rack-fill/ and make the icon forest green | ✅ Done |
+| Add omada status | |
+
+## cut
+| task | reason | reassess when |
+|------|--------|---------------|
+| run fail2ban or something infront of auth to block requests from abusive IPs | use oauth as the barricade, the redirect shouldnt consume enough resources and PAM isn't exposed on the public hostname | after pipeline and other hardening work (daemon for full featured hosts?) |

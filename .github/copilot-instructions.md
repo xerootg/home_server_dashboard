@@ -406,6 +406,7 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
 
 ```json
 {
+  "port": 9001,                         // HTTP server port (default 9001)
   "hosts": [
     {
       "name": "nas",                    // Display name

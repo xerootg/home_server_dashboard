@@ -10,9 +10,12 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 - Monitor systemd units on local and remote hosts
 - Monitor Home Assistant instances (with full HAOS addon support)
 - Real-time log streaming via Server-Sent Events
-- Dark theme web interface with sorting and filtering
+- Real-time service state updates via WebSocket
+- Dark theme web interface with sorting, filtering, and search
+- Filter mode (hide non-matching) and Find mode (navigate between matches)
 - Bang & Pipe query language for advanced filtering - [readme on that](docs/bangandpipe-query-language.md)
-- Traefik integration for displaying exposed hostnames
+- Traefik integration for hostnames and external service discovery
+- Log truncation for Docker containers
 - Gotify push notifications for service state changes
 
 ## Requirements
@@ -35,6 +38,7 @@ cp sample.services.json services.json
 
 ```json
 {
+  "port": 9001,
   "hosts": [
     {
       "name": "myserver",
@@ -45,6 +49,10 @@ cp sample.services.json services.json
   ]
 }
 ```
+
+| Field | Description |
+|-------|-------------|
+| `port` | HTTP server port (default: 9001) |
 
 3. Build and run:
 
@@ -117,7 +125,13 @@ To display Traefik-exposed hostnames as clickable links next to services, enable
 }
 ```
 
-The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
+The dashboard queries Traefik's `/api/http/routers` and `/api/http/services` endpoints to discover hostnames and external services:
+
+**Hostname Discovery:** Services with `Host()` or `HostRegexp()` rules get green hostname badges. When both are present, exact `Host()` matches are preferred.
+
+**External Service Discovery:** Traefik can expose services that aren't Docker containers or systemd units (e.g., reverse-proxied external hosts defined in file providers). These appear as "traefik" source services with health status based on Traefik's backend server status (UP/DOWN).
+
+**SSH Tunneling:** For remote hosts, the dashboard automatically tunnels through SSH to reach the Traefik API.
 
 ### Home Assistant Integration
 
@@ -275,6 +289,23 @@ The dashboard reads custom labels from Docker containers to customize visibility
 | `home.server.dashboard.ports.hidden` | Comma-separated port numbers to hide (e.g., `8080,9000`) |
 | `home.server.dashboard.ports.<port>.label` | Custom label for a specific port |
 | `home.server.dashboard.ports.<port>.hidden` | Set to `true` to hide a specific port |
+| `home.server.dashboard.remapport.<port>` | Remap a port to another service (for containers sharing network namespace) |
+
+**Port Remapping:** For containers that share a network namespace (e.g., services running through a VPN container like gluetun), use `remapport` to show the port on the correct service:
+
+```yaml
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    ports:
+      - "8193:8193"  # qbittorrent web UI exposed through VPN
+    labels:
+      home.server.dashboard.remapport.8193: qbittorrent
+  
+  qbittorrent:
+    network_mode: "service:gluetun"
+    # Port 8193 will appear on qbittorrent with a link using gluetun's IP
+```
 
 Example:
 ```yaml
@@ -289,6 +320,38 @@ services:
 ### Systemd Descriptions
 
 Descriptions for systemd units are automatically fetched from the unit's `Description` field.
+
+## Web Interface
+
+### Search Modes
+
+The table search widget (below the filter cards) supports two modes:
+
+- **Filter mode** (funnel icon): Hides rows that don't match the search term. Shows "X of Y" count.
+- **Find mode** (search icon): Highlights matches and allows navigation between them with up/down buttons or Enter/Shift+Enter. Shows "1 of N" current position.
+
+Toggle between modes by clicking the mode icon button. The search supports plain text, regex (case sensitivity toggle available), and Bang & Pipe expressions.
+
+### Host Filter Row
+
+A dynamic row of host badges appears below the status/source filter cards, showing all configured hosts with service counts. Click a host badge to filter the table to that host only.
+
+### Log Viewer
+
+Click any service row to expand an inline log viewer with real-time streaming. The log search box supports:
+
+- Plain text search (case-insensitive by default)
+- **Regex mode**: Prefix with `!` to invert matches (show lines NOT matching the pattern)
+- Bang & Pipe expressions for complex queries
+
+### Log Management
+
+For Docker containers, the dashboard tracks log file sizes and displays them in the Logs column. Administrators can truncate container logs to reclaim disk space:
+
+1. Click the log size badge in the Logs column
+2. Confirm the truncation in the modal dialog
+
+**Note:** Log truncation requires the `log-truncate-helper` binary and appropriate permissions. The install script sets this up automatically with setcap capabilities.
 
 ## Authentication
 
@@ -419,7 +482,7 @@ For remote hosts, systemctl commands are executed over SSH and require sudo priv
 ./dashboard -generate-sudoers
 
 # Generate for a specific user
-./dashboard -generate-sudoers -sudoers-user myuser
+./dashboard -generate-sudoers -user myuser
 ```
 
 This outputs a sudoers configuration based on your configured systemd services. Install it with:
@@ -472,6 +535,29 @@ sudo usermod -aG docker youruser
 - **Principle of Least Privilege**: Only grant sudo access to the specific services listed in your `services.json`
 - **Avoid wildcards**: Don't use `systemctl *` patterns in sudoers
 - **SSH hardening**: Consider using a dedicated SSH key for the dashboard and restricting it with `ForceCommand` if needed
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Dashboard HTML page (protected) |
+| `/static/*` | GET | Static files (CSS/JS, public) |
+| `/login` | GET | Initiate OIDC login flow |
+| `/oidc/callback` | GET | OIDC callback handler |
+| `/logout` | GET | Clear session, redirect to login |
+| `/auth/status` | GET | Authentication status JSON |
+| `/api/services` | GET | All services JSON array |
+| `/api/logs?container=<name>` | GET | Docker container logs (SSE stream) |
+| `/api/logs/systemd?unit=<name>&host=<host>` | GET | Systemd unit logs (SSE stream) |
+| `/api/logs/traefik?service=<name>&host=<host>` | GET | Traefik service logs (stub) |
+| `/api/logs/homeassistant?...` | GET | Home Assistant logs (SSE stream) |
+| `/api/logs/flush` | POST | Truncate Docker container logs (admin) |
+| `/api/services/start` | POST | Start a service (SSE status updates) |
+| `/api/services/stop` | POST | Stop a service (SSE status updates) |
+| `/api/services/restart` | POST | Restart a service (SSE status updates) |
+| `/api/bangAndPipeToRegex?expr=<expr>` | GET | Compile Bang & Pipe expression to AST |
+| `/api/docs/bangandpipe` | GET | Bang & Pipe documentation HTML |
+| `/ws` | GET | WebSocket for real-time service updates |
 
 ## License
 
