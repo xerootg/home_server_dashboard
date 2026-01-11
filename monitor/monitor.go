@@ -1,6 +1,6 @@
 // Package monitor provides service monitoring and state change detection.
 // It uses native event sources (Docker events API, systemd D-Bus signals) where
-// available, with polling as a fallback for remote hosts.
+// available, with polling as a fallback for remote hosts and Home Assistant.
 package monitor
 
 import (
@@ -18,6 +18,7 @@ import (
 	"home_server_dashboard/config"
 	"home_server_dashboard/events"
 	"home_server_dashboard/services"
+	"home_server_dashboard/services/homeassistant"
 	"home_server_dashboard/services/systemd"
 )
 
@@ -117,8 +118,14 @@ func (m *Monitor) Start() {
 		go m.pollRemoteHosts()
 	}
 
-	log.Printf("Service monitor started (Docker events: %v, systemd D-Bus: %v, remote polling: %v)",
-		m.dockerClient != nil, m.dbusConn != nil, m.hasRemoteHosts())
+	// Start polling for Home Assistant instances
+	if m.hasHomeAssistantHosts() {
+		m.wg.Add(1)
+		go m.pollHomeAssistantHosts()
+	}
+
+	log.Printf("Service monitor started (Docker events: %v, systemd D-Bus: %v, remote polling: %v, HA polling: %v)",
+		m.dockerClient != nil, m.dbusConn != nil, m.hasRemoteHosts(), m.hasHomeAssistantHosts())
 }
 
 // Stop stops the monitor and waits for it to finish.
@@ -614,4 +621,79 @@ func (m *Monitor) HostCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.hostStates)
+}
+
+// hasHomeAssistantHosts returns true if there are Home Assistant hosts configured.
+func (m *Monitor) hasHomeAssistantHosts() bool {
+	for _, host := range m.cfg.Hosts {
+		if host.HasHomeAssistant() {
+			return true
+		}
+	}
+	return false
+}
+
+// pollHomeAssistantHosts polls Home Assistant instances for health status.
+func (m *Monitor) pollHomeAssistantHosts() {
+	defer m.wg.Done()
+
+	// Wait for initial discovery to complete before polling
+	time.Sleep(2 * time.Second)
+
+	ticker := time.NewTicker(m.pollInterval)
+	defer ticker.Stop()
+
+	// Initial poll
+	m.pollHomeAssistant()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.pollHomeAssistant()
+		}
+	}
+}
+
+// pollHomeAssistant fetches current health status from Home Assistant instances.
+func (m *Monitor) pollHomeAssistant() {
+	ctx, cancel := context.WithTimeout(context.Background(), m.pollInterval/2)
+	defer cancel()
+
+	for _, host := range m.cfg.Hosts {
+		if !host.HasHomeAssistant() {
+			continue
+		}
+
+		haProvider, err := homeassistant.NewProvider(&host)
+		if err != nil {
+			log.Printf("Monitor: failed to create Home Assistant provider for %s: %v", host.Name, err)
+			m.handleHostError(host.Name, err.Error())
+			continue
+		}
+		if haProvider == nil {
+			continue
+		}
+
+		state, status, err := haProvider.CheckHealth(ctx)
+		if err != nil {
+			log.Printf("Monitor: Home Assistant on %s is unreachable: %v", host.Name, err)
+			m.handleHostError(host.Name, err.Error())
+		} else {
+			m.handleHostSuccess(host.Name)
+		}
+
+		// Update service state
+		svc := services.ServiceInfo{
+			Name:   "homeassistant",
+			Host:   host.Name,
+			State:  state,
+			Status: status,
+			Source: "homeassistant",
+		}
+		m.updateServiceState(svc)
+	}
+
+	m.markDiscoveryComplete()
 }

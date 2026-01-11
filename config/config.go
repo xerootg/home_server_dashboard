@@ -49,14 +49,73 @@ type TraefikConfig struct {
 	APIPort int `json:"api_port"`
 }
 
+// HomeAssistantConfig holds Home Assistant API connection settings for a host.
+type HomeAssistantConfig struct {
+	// Port is the Home Assistant API port (default 8123).
+	Port int `json:"port"`
+	// UseHTTPS determines whether to use HTTPS for the API connection.
+	UseHTTPS bool `json:"use_https"`
+	// IgnoreHTTPSErrors skips TLS certificate verification (for self-signed certs).
+	IgnoreHTTPSErrors bool `json:"ignore_https_errors"`
+	// LongLivedToken is the Home Assistant long-lived access token for API auth.
+	LongLivedToken string `json:"longlivedtoken"`
+	// IsHomeAssistantOS indicates this is a Home Assistant OS installation with Supervisor.
+	// When true, the dashboard will query for addons, core, supervisor, and host logs.
+	IsHomeAssistantOS bool `json:"is_homeassistant_operatingsystem"`
+	// SSHAddonPort is the port for the SSH & Web Terminal addon (default 22).
+	// Used to tunnel Supervisor API requests through SSH.
+	// The SUPERVISOR_TOKEN environment variable must be set on the dashboard host.
+	SSHAddonPort int `json:"ssh_addon_port,omitempty"`
+}
+
 // HostConfig represents a single host's configuration.
 type HostConfig struct {
-	Name               string        `json:"name"`
-	Address            string        `json:"address"`
-	NIC                []string      `json:"nic"`
-	SystemdServices    []string      `json:"systemd_services"`
-	DockerComposeRoots []string      `json:"docker_compose_roots"`
-	Traefik            TraefikConfig `json:"traefik"`
+	Name               string               `json:"name"`
+	Address            string               `json:"address"`
+	NIC                []string             `json:"nic"`
+	SystemdServices    []string             `json:"systemd_services"`
+	DockerComposeRoots []string             `json:"docker_compose_roots"`
+	Traefik            TraefikConfig        `json:"traefik"`
+	HomeAssistant      *HomeAssistantConfig `json:"homeassistant,omitempty"`
+}
+
+// HasHomeAssistant returns true if this host has Home Assistant configured.
+func (h *HostConfig) HasHomeAssistant() bool {
+	return h.HomeAssistant != nil && h.HomeAssistant.LongLivedToken != ""
+}
+
+// HasSupervisorAPI returns true if this host has Supervisor API access configured.
+// Requires HAOS mode and SSH addon port, plus SUPERVISOR_TOKEN environment variable.
+func (h *HostConfig) HasSupervisorAPI() bool {
+	return h.HasHomeAssistant() &&
+		h.HomeAssistant.IsHomeAssistantOS &&
+		h.HomeAssistant.SSHAddonPort > 0
+}
+
+// GetSSHAddonPort returns the SSH addon port for tunneling Supervisor API requests.
+// Returns 22 as default if not specified.
+func (h *HostConfig) GetSSHAddonPort() int {
+	if h.HomeAssistant == nil || h.HomeAssistant.SSHAddonPort == 0 {
+		return 22
+	}
+	return h.HomeAssistant.SSHAddonPort
+}
+
+// GetHomeAssistantEndpoint returns the full URL for the Home Assistant API.
+// Returns empty string if Home Assistant is not configured.
+func (h *HostConfig) GetHomeAssistantEndpoint() string {
+	if !h.HasHomeAssistant() {
+		return ""
+	}
+	port := h.HomeAssistant.Port
+	if port == 0 {
+		port = 8123
+	}
+	scheme := "http"
+	if h.HomeAssistant.UseHTTPS {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s:%d/api/", scheme, h.Address, port)
 }
 
 // IsLocal returns true if this host is the local machine.

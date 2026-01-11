@@ -96,6 +96,8 @@ export function toggleLogs(row) {
         url = '/api/logs/systemd?unit=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
     } else if (source === 'traefik') {
         url = '/api/logs/traefik?service=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
+    } else if (source === 'homeassistant' || source === 'homeassistant-addon') {
+        url = '/api/logs/homeassistant?service=' + encodeURIComponent(serviceName) + '&host=' + encodeURIComponent(host);
     } else {
         url = '/api/logs?container=' + encodeURIComponent(containerName) + '&service=' + encodeURIComponent(serviceName);
     }

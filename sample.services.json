@@ -29,10 +29,22 @@
         "enabled": false,
         "api_port": 8080
       }
+    },
+    {
+      "name": "homeassistant",
+      "address": "some.ip.address",
+      "homeassistant": {
+        "port": 8123,
+        "use_https": true,
+        "ignore_https_errors": true,
+        "is_homeassistant_operatingsystem": true,
+        "ssh_addon_port": 22,
+      },
+      "docker_compose_roots": [],
+      "systemd_services": []
     }
   ],
-  "gotify":
-  {
+  "gotify": {
     "enabled": true,
     "hostname": "https://gotify.something",
     "token": "a big secret"

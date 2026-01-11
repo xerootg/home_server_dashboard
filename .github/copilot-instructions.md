@@ -59,13 +59,16 @@ home_server_dashboard/
 │   │   ├── systemd.go             # Systemd provider and service implementation
 │   │   ├── systemd_test.go        # Unit tests (mocked, no D-Bus required)
 │   │   └── systemd_integration_test.go # Integration tests (requires systemd)
-│   └── traefik/
-│       ├── traefik.go             # Traefik API client for hostname lookup
-│       ├── traefik_test.go        # Unit tests for Traefik client
-│       ├── service.go             # Traefik service provider and service implementation
-│       ├── service_test.go        # Unit tests for Traefik service provider
-│       ├── matcher.go             # MatcherLookupService for hostname extraction with state tracking
-│       └── matcher_test.go        # Unit tests for matcher lookup service
+│   ├── traefik/
+│   │   ├── traefik.go             # Traefik API client for hostname lookup
+│   │   ├── traefik_test.go        # Unit tests for Traefik client
+│   │   ├── service.go             # Traefik service provider and service implementation
+│   │   ├── service_test.go        # Unit tests for Traefik service provider
+│   │   ├── matcher.go             # MatcherLookupService for hostname extraction with state tracking
+│   │   └── matcher_test.go        # Unit tests for matcher lookup service
+│   └── homeassistant/
+│       ├── homeassistant.go       # Home Assistant provider and service implementation
+│       └── homeassistant_test.go  # Unit tests for Home Assistant provider
 ├── frontend/                      # Frontend source and tests (JSX/ES6 modules)
 │   ├── jsx.js                     # Minimal JSX runtime (h, Fragment, raw)
 │   ├── main.jsx                   # Entry point, DOMContentLoaded, window.__dashboard global
@@ -329,6 +332,43 @@ home_server_dashboard/
   - **Error Recovery:** Logs when a previously-failing router recovers
   - **HostRegexp Fallback:** Extracts domain suffixes from regex patterns only when no `Host()` is present (e.g., `{subdomain:[a-z]+}.example.com` → `example.com`)
 
+### `services/homeassistant` Package
+- **Purpose:** Home Assistant API client for health monitoring and service control. For HAOS installations, also provides addon discovery and control via the Supervisor API.
+- **Key Types:**
+  - `Provider` — Implements `services.Provider` for Home Assistant instances
+  - `Service` — Implements `services.Service` for HA core, supervisor, host, and addon control
+  - `Addon` — Represents a Home Assistant addon from the Supervisor API
+  - `AddonsResponse`, `SupervisorInfo`, `CoreInfo`, `HostInfo` — API response types
+- **Key Functions:**
+  - `NewProvider(hostConfig)` — Creates provider from host config (returns nil if HA not configured)
+  - `GetServices(ctx)` — For HAOS: returns Core, Supervisor, Host, and all addons; otherwise just HA core
+  - `CheckHealth(ctx)` — Returns state ("running"/"stopped") and status message
+  - `Restart(ctx)` — Calls `homeassistant.restart` service via HA REST API (fallback for non-HAOS)
+  - `CoreControl(ctx, action)` — Start/stop/restart HA Core via Supervisor API (HAOS only)
+  - `GetAddons(ctx)` — Returns list of installed addons (HAOS only)
+  - `GetAddonLogs(ctx, slug, follow)` — Streams addon logs (HAOS only)
+  - `GetCoreLogs(ctx, follow)` — Streams HA Core logs (HAOS only)
+  - `GetSupervisorLogs(ctx, follow)` — Streams Supervisor logs (HAOS only)
+  - `GetHostLogs(ctx, follow)` — Streams Host OS logs (HAOS only)
+  - `AddonControl(ctx, slug, action)` — Start/stop/restart an addon (HAOS only)
+  - `HasSupervisorAPI()` — Returns true if Supervisor API is available
+- **Dependencies:**
+  - `github.com/mutablelogic/go-client/pkg/homeassistant` — Official HA Go client
+  - `golang.org/x/crypto/ssh` — SSH client for Supervisor API tunneling
+- **Features:**
+  - Uses Home Assistant REST API with long-lived access tokens
+  - Supports HTTPS with optional certificate verification skip (for self-signed certs)
+  - Health status based on API `/api/` endpoint response
+  - **HAOS Support:** When `is_homeassistant_operatingsystem` is true and `ssh_addon_port` is configured:
+    - Discovers all installed addons as separate services
+    - Provides log streaming for Core, Supervisor, Host, and individual addons
+    - Supports start/stop/restart for addons via Supervisor API (`POST /addons/<slug>/start|stop|restart`)
+    - Supports start/stop/restart for HA Core via Supervisor API (`POST /core/start|stop|restart`)
+    - Uses SSH addon for tunneling to internal Supervisor API (`http://supervisor`)
+    - Automatically fetches `SUPERVISOR_TOKEN` from SSH addon container at `/run/s6/container_environment/SUPERVISOR_TOKEN`
+  - **Non-HAOS Support:** Only restart is supported for HA Core via HA REST API (`homeassistant.restart` service)
+  - Monitored for state changes and emits Gotify notifications
+
 ## Configuration (services.json)
 
 Defines which hosts and services to monitor. Supports JSON with comments (`//`, `/* */`) and trailing commas via [hujson](https://github.com/tailscale/hujson). **The service will fail to start if the config file cannot be parsed.**
@@ -348,7 +388,18 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
       }
     },
     {
-      // another host
+      "name": "homeassistant",          // Home Assistant host
+      "address": "192.168.1.50",        // IP or hostname of HA instance
+      "homeassistant": {
+        "port": 8123,                   // HA API port (default 8123)
+        "use_https": true,              // Use HTTPS for API connection
+        "ignore_https_errors": true,    // Skip TLS verification (for self-signed certs)
+        "longlivedtoken": "your-token", // Long-lived access token from HA
+        "is_homeassistant_operatingsystem": true,  // Enable HAOS addon discovery
+        "ssh_addon_port": 22            // SSH addon port for Supervisor API tunneling (default 22)
+      },
+      "systemd_services": [],
+      "docker_compose_roots": []
     }
   ],
   "oidc": {                             // Optional: OIDC authentication
@@ -700,5 +751,6 @@ JavaScript tests cover the client-side functionality with modular test files:
 | services/docker | ✅ | ✅ |
 | services/systemd | ✅ | ✅ |
 | services/traefik | ✅ | — |
+| services/homeassistant | ✅ | — |
 | frontend | ✅ (Node.js) | — |
 

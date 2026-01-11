@@ -8,10 +8,12 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 
 - Monitor Docker containers from Compose projects
 - Monitor systemd units on local and remote hosts
+- Monitor Home Assistant instances (with full HAOS addon support)
 - Real-time log streaming via Server-Sent Events
 - Dark theme web interface with sorting and filtering
 - Bang & Pipe query language for advanced filtering - [readme on that](docs/bangandpipe-query-language.md)
 - Traefik integration for displaying exposed hostnames
+- Gotify push notifications for service state changes
 
 ## Requirements
 
@@ -19,6 +21,7 @@ A lightweight Go web dashboard for monitoring Docker Compose services and system
 - Docker (for container monitoring)
 - SSH access to remote hosts (for remote systemd monitoring)
 - Traefik with API enabled (optional, for hostname discovery)
+- Home Assistant with long-lived access token (optional, for HA monitoring)
 
 ## Quick Start
 
@@ -89,7 +92,7 @@ Uninstall:
 
 ## How It Works
 
-The dashboard queries Docker containers via the Docker socket and systemd units via D-Bus (for localhost) or SSH (for remote hosts). It serves a single-page web interface that fetches service status from `/api/services` and displays them in a sortable table. Clicking a service row opens an inline log viewer that streams logs in real-time using Server-Sent Events. The configuration file defines which hosts to monitor and which systemd units to track on each host. Docker Compose projects are auto-discovered by scanning the specified root directories.
+The dashboard queries Docker containers via the Docker socket, systemd units via D-Bus (for localhost) or SSH (for remote hosts), and Home Assistant instances via the REST API. For HAOS installations, it additionally tunnels through SSH to access the Supervisor API for addon management. It serves a single-page web interface that fetches service status from `/api/services` and displays them in a sortable table. Clicking a service row opens an inline log viewer that streams logs in real-time using Server-Sent Events. The configuration file defines which hosts to monitor and which systemd units to track on each host. Docker Compose projects are auto-discovered by scanning the specified root directories.
 
 ## Configuration
 
@@ -115,6 +118,114 @@ To display Traefik-exposed hostnames as clickable links next to services, enable
 ```
 
 The dashboard queries Traefik's `/api/http/routers` endpoint to discover which services have `Host()` rules and displays them as green hostname badges. For remote hosts, it automatically tunnels through SSH to reach the Traefik API.
+
+### Home Assistant Integration
+
+The dashboard can monitor Home Assistant instances and display their health status. There are two levels of integration:
+
+1. **Basic monitoring** (any HA installation): Shows HA health status and allows restart
+2. **Full HAOS integration** (Home Assistant OS only): Shows all addons, streams logs, and allows addon control
+
+#### Basic Home Assistant Monitoring (Docker/Supervised/Core)
+
+For any Home Assistant installation, you can monitor the core HA service:
+
+```json
+{
+  "hosts": [
+    {
+      "name": "homeassistant",
+      "address": "192.168.1.50",
+      "homeassistant": {
+        "port": 8123,
+        "use_https": true,
+        "ignore_https_errors": true,
+        "longlivedtoken": "your-long-lived-access-token"
+      },
+      "systemd_services": [],
+      "docker_compose_roots": []
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `port` | Home Assistant API port (default: 8123) |
+| `use_https` | Use HTTPS for API connection |
+| `ignore_https_errors` | Skip TLS certificate verification (for self-signed certs) |
+| `longlivedtoken` | Long-lived access token from HA (create in Profile → Security → Long-Lived Access Tokens) |
+
+**Features with basic monitoring:**
+- Health status (running/stopped) displayed in dashboard
+- Restart HA Core via the dashboard (start/stop not supported without HAOS)
+- Gotify notifications when HA becomes unreachable
+
+#### Full Home Assistant OS Integration (HAOS)
+
+For Home Assistant OS installations, you can get complete visibility including all addons, log streaming, and addon control. This requires the [Advanced SSH & Web Terminal addon](https://github.com/hassio-addons/addon-ssh).
+
+**Prerequisites:**
+
+1. Install the **Advanced SSH & Web Terminal** addon from the Home Assistant Add-on Store (Community Add-ons repository)
+
+2. Configure the SSH addon with atleast these options: 
+   ```yaml
+   ssh:
+     username: hassio
+     authorized_keys:
+       - >-
+          (your public key instead, but the whole line just like an authorized_keys file, one per yaml element)
+     allow_remote_port_forwarding: true
+     allow_tcp_forwarding: true
+   ```
+
+3. Start the SSH addon and verify you can connect:
+   ```bash
+   ssh hassio@192.168.1.50 -p 22
+   ```
+
+4. Configure the dashboard with HAOS settings:
+
+```json
+{
+  "hosts": [
+    {
+      "name": "homeassistant",
+      "address": "192.168.1.50",
+      "homeassistant": {
+        "port": 8123,
+        "use_https": true,
+        "ignore_https_errors": true,
+        "longlivedtoken": "your-long-lived-access-token",
+        "is_homeassistant_operatingsystem": true,
+        "ssh_addon_port": 22
+      },
+      "systemd_services": [],
+      "docker_compose_roots": []
+    }
+  ]
+}
+```
+
+| Additional Field | Description |
+|-----------------|-------------|
+| `is_homeassistant_operatingsystem` | Enable HAOS addon discovery via Supervisor API |
+| `ssh_addon_port` | SSH addon port (default: 22) |
+
+**How it works:**
+
+The dashboard connects to the SSH addon and creates a tunnel to the internal Supervisor API (`http://supervisor`). It automatically retrieves the `SUPERVISOR_TOKEN` from the SSH addon container, which rotates on each HAOS reboot.
+
+**Features with HAOS integration:**
+- All installed addons displayed as separate services
+- Real-time log streaming for Core, Supervisor, Host, and individual addons
+- Start/stop/restart HA Core via the Supervisor API
+- Start/stop/restart addons via the dashboard
+- Supervisor and Host OS status display
+- Gotify notifications for addon state changes
+
+**Note:** The SSH addon must remain running for the Supervisor API access to work. If you stop the SSH addon, the dashboard will fall back to basic monitoring.
 
 ### Gotify Push Notifications
 
@@ -149,6 +260,7 @@ The monitor uses native event sources for efficient real-time detection:
 - **Docker**: Uses the Docker Events API to receive container state changes instantly
 - **Local systemd**: Uses D-Bus signals for immediate unit state notifications
 - **Remote systemd**: Falls back to polling (every 60 seconds) since native events aren't available over SSH
+- **Home Assistant**: Polls the HA API at regular intervals; for HAOS, also monitors addon states
 
 **Note:** On startup, the monitor captures the current state of all services without sending notifications, so you won't receive a flood of alerts when the dashboard restarts.
 

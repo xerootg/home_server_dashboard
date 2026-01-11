@@ -845,3 +845,230 @@ func TestLoad_GotifyConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestHomeAssistantConfig_HasHomeAssistant(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected bool
+	}{
+		{
+			name: "has valid config with token",
+			host: HostConfig{
+				HomeAssistant: &HomeAssistantConfig{
+					Port:           8123,
+					UseHTTPS:       true,
+					LongLivedToken: "valid-token",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "nil homeassistant config",
+			host: HostConfig{
+				HomeAssistant: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "empty token",
+			host: HostConfig{
+				HomeAssistant: &HomeAssistantConfig{
+					Port:           8123,
+					LongLivedToken: "",
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.host.HasHomeAssistant()
+			if result != tt.expected {
+				t.Errorf("HasHomeAssistant() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHomeAssistantConfig_GetHomeAssistantEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected string
+	}{
+		{
+			name: "http with default port",
+			host: HostConfig{
+				Address: "192.168.1.100",
+				HomeAssistant: &HomeAssistantConfig{
+					Port:           0, // should default to 8123
+					UseHTTPS:       false,
+					LongLivedToken: "token",
+				},
+			},
+			expected: "http://192.168.1.100:8123/api/",
+		},
+		{
+			name: "https with custom port",
+			host: HostConfig{
+				Address: "homeassistant.local",
+				HomeAssistant: &HomeAssistantConfig{
+					Port:           443,
+					UseHTTPS:       true,
+					LongLivedToken: "token",
+				},
+			},
+			expected: "https://homeassistant.local:443/api/",
+		},
+		{
+			name: "https with standard port",
+			host: HostConfig{
+				Address: "192.168.1.50",
+				HomeAssistant: &HomeAssistantConfig{
+					Port:              8123,
+					UseHTTPS:          true,
+					IgnoreHTTPSErrors: true,
+					LongLivedToken:    "my-token",
+				},
+			},
+			expected: "https://192.168.1.50:8123/api/",
+		},
+		{
+			name: "nil config returns empty",
+			host: HostConfig{
+				Address:       "192.168.1.100",
+				HomeAssistant: nil,
+			},
+			expected: "",
+		},
+		{
+			name: "empty token returns empty",
+			host: HostConfig{
+				Address: "192.168.1.100",
+				HomeAssistant: &HomeAssistantConfig{
+					Port:           8123,
+					LongLivedToken: "",
+				},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.host.GetHomeAssistantEndpoint()
+			if result != tt.expected {
+				t.Errorf("GetHomeAssistantEndpoint() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoad_HomeAssistantConfig(t *testing.T) {
+	// Create a temporary directory for test config files
+	tempDir := t.TempDir()
+
+	t.Run("parses homeassistant config", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "ha_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "hahost",
+					"address": "192.168.1.50",
+					"homeassistant": {
+						"port": 8123,
+						"use_https": true,
+						"ignore_https_errors": true,
+						"longlivedtoken": "my-long-lived-token"
+					},
+					"systemd_services": [],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if len(cfg.Hosts) != 1 {
+			t.Fatalf("Expected 1 host, got %d", len(cfg.Hosts))
+		}
+
+		host := cfg.Hosts[0]
+		if host.HomeAssistant == nil {
+			t.Fatal("HomeAssistant config is nil")
+		}
+
+		if host.HomeAssistant.Port != 8123 {
+			t.Errorf("Port = %d, want 8123", host.HomeAssistant.Port)
+		}
+		if !host.HomeAssistant.UseHTTPS {
+			t.Error("UseHTTPS = false, want true")
+		}
+		if !host.HomeAssistant.IgnoreHTTPSErrors {
+			t.Error("IgnoreHTTPSErrors = false, want true")
+		}
+		if host.HomeAssistant.LongLivedToken != "my-long-lived-token" {
+			t.Errorf("LongLivedToken = %q, want %q", host.HomeAssistant.LongLivedToken, "my-long-lived-token")
+		}
+
+		if !host.HasHomeAssistant() {
+			t.Error("HasHomeAssistant() = false, want true")
+		}
+
+		expectedEndpoint := "https://192.168.1.50:8123/api/"
+		if host.GetHomeAssistantEndpoint() != expectedEndpoint {
+			t.Errorf("GetHomeAssistantEndpoint() = %q, want %q", host.GetHomeAssistantEndpoint(), expectedEndpoint)
+		}
+	})
+
+	t.Run("host without homeassistant config", func(t *testing.T) {
+		configPath := filepath.Join(tempDir, "no_ha_config.json")
+		jsonContent := `{
+			"hosts": [
+				{
+					"name": "normalhost",
+					"address": "localhost",
+					"systemd_services": ["docker.service"],
+					"docker_compose_roots": []
+				}
+			]
+		}`
+
+		err := os.WriteFile(configPath, []byte(jsonContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if len(cfg.Hosts) != 1 {
+			t.Fatalf("Expected 1 host, got %d", len(cfg.Hosts))
+		}
+
+		host := cfg.Hosts[0]
+		if host.HomeAssistant != nil {
+			t.Error("HomeAssistant config should be nil when not specified")
+		}
+
+		if host.HasHomeAssistant() {
+			t.Error("HasHomeAssistant() = true, want false")
+		}
+
+		if host.GetHomeAssistantEndpoint() != "" {
+			t.Errorf("GetHomeAssistantEndpoint() = %q, want empty", host.GetHomeAssistantEndpoint())
+		}
+	})
+}

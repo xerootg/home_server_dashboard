@@ -171,6 +171,18 @@ describe('getSourceIcons', () => {
         assert(result.includes('text-warning'), 'Should be warning color');
     });
 
+    it('returns homeassistant icon for homeassistant source', () => {
+        const result = getSourceIcons({ source: 'homeassistant' });
+        assert(result.includes('bi-house-heart-fill'), 'Should include house-heart icon');
+        assert(result.includes('text-primary'), 'Should be primary color');
+    });
+
+    it('returns homeassistant-addon icon for homeassistant-addon source', () => {
+        const result = getSourceIcons({ source: 'homeassistant-addon' });
+        assert(result.includes('bi-puzzle-fill'), 'Should include puzzle icon');
+        assert(result.includes('text-info'), 'Should be info color');
+    });
+
     it('adds traefik icon when service has traefik_urls', () => {
         const result = getSourceIcons({ source: 'docker', traefik_urls: ['https://app.example.com'] });
         assert(result.includes('bi-box'), 'Should include docker icon');

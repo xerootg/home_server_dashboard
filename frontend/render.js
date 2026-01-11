@@ -84,6 +84,10 @@ export function getSourceIcons(service) {
         icons += '<i class="bi bi-gear-fill text-info" title="systemd"></i>';
     } else if (service.source === 'traefik') {
         icons += '<i class="bi bi-signpost-split text-warning" title="Traefik"></i>';
+    } else if (service.source === 'homeassistant') {
+        icons += '<i class="bi bi-house-heart-fill text-primary" title="Home Assistant"></i>';
+    } else if (service.source === 'homeassistant-addon') {
+        icons += '<i class="bi bi-puzzle-fill text-info" title="Home Assistant Addon"></i>';
     } else {
         icons += '<i class="bi bi-box text-primary" title="Docker"></i>';
     }
@@ -151,6 +155,7 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
     let dockerCount = 0;
     let systemdCount = 0;
     let traefikCount = 0;
+    let homeassistantCount = 0;
 
     services.forEach(service => {
         if (service.state.toLowerCase() === 'running') {
@@ -164,6 +169,8 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
             systemdCount++;
         } else if (service.source === 'traefik') {
             traefikCount++;
+        } else if (service.source === 'homeassistant' || service.source === 'homeassistant-addon') {
+            homeassistantCount++;
         }
         if (service.source !== 'traefik' && service.traefik_urls && service.traefik_urls.length > 0) {
             traefikCount++;
@@ -215,5 +222,6 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
         document.getElementById('dockerCount').innerHTML = '<i class="bi bi-box text-primary"></i> ' + dockerCount;
         document.getElementById('systemdCount').innerHTML = '<i class="bi bi-gear-fill text-info"></i> ' + systemdCount;
         document.getElementById('traefikCount').innerHTML = '<i class="bi bi-signpost-split text-warning"></i> ' + traefikCount;
+        document.getElementById('homeassistantCount').innerHTML = '<i class="bi bi-house-heart-fill text-primary"></i> ' + homeassistantCount;
     }
 }

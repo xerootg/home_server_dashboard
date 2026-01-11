@@ -25,6 +25,7 @@ import (
 	"home_server_dashboard/query"
 	"home_server_dashboard/services"
 	"home_server_dashboard/services/docker"
+	"home_server_dashboard/services/homeassistant"
 	"home_server_dashboard/services/systemd"
 	"home_server_dashboard/services/traefik"
 )
@@ -85,6 +86,33 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 			systemdServices[i].HostIP = hostIPMap[systemdServices[i].Host]
 		}
 		allServices = append(allServices, systemdServices...)
+	}
+
+	// Get Home Assistant services from each configured host
+	for _, host := range cfg.Hosts {
+		if !host.HasHomeAssistant() {
+			continue
+		}
+
+		haProvider, err := homeassistant.NewProvider(&host)
+		if err != nil {
+			log.Printf("Warning: failed to create Home Assistant provider for %s: %v", host.Name, err)
+			continue
+		}
+		if haProvider == nil {
+			continue
+		}
+
+		haServices, err := haProvider.GetServices(ctx)
+		if err != nil {
+			log.Printf("Warning: failed to get Home Assistant services from %s: %v", host.Name, err)
+			continue
+		}
+		// Set HostIP for each HA service
+		for i := range haServices {
+			haServices[i].HostIP = hostIPMap[haServices[i].Host]
+		}
+		allServices = append(allServices, haServices...)
 	}
 
 	// Apply port remapping (move ports from source services to target services)
@@ -499,6 +527,100 @@ func TraefikLogsHandler(w http.ResponseWriter, r *http.Request) {
 	<-r.Context().Done()
 }
 
+// HomeAssistantLogsHandler handles GET /api/logs/homeassistant requests.
+// For HAOS installations with Supervisor API access, streams logs from Core, Supervisor, Host, or Addons.
+// For standard HA installations, returns a stub message.
+func HomeAssistantLogsHandler(w http.ResponseWriter, r *http.Request) {
+	serviceName := r.URL.Query().Get("service")
+	hostName := r.URL.Query().Get("host")
+	if serviceName == "" {
+		serviceName = "homeassistant"
+	}
+
+	// Check user permissions
+	user := auth.GetUserFromContext(r.Context())
+	if user != nil && !user.CanAccessService(hostName, serviceName) {
+		http.Error(w, "Access denied: you do not have permission to view logs for this service", http.StatusForbidden)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the Home Assistant provider for this host
+	cfg := config.Get()
+	var provider *homeassistant.Provider
+	for _, host := range cfg.Hosts {
+		if host.Name == hostName && host.HasHomeAssistant() {
+			var err error
+			provider, err = homeassistant.NewProvider(&host)
+			if err != nil {
+				log.Printf("Failed to create HA provider for %s: %v", hostName, err)
+			}
+			break
+		}
+	}
+
+	// Get logs from the provider
+	if provider != nil {
+		logs, err := provider.GetLogs(r.Context(), serviceName, 100, true)
+		if err != nil {
+			log.Printf("Failed to get logs for %s: %v", serviceName, err)
+			fmt.Fprintf(w, "data: Error getting logs: %v\n\n", err)
+			flusher.Flush()
+		} else {
+			defer logs.Close()
+			scanner := bufio.NewScanner(logs)
+			for scanner.Scan() {
+				select {
+				case <-r.Context().Done():
+					return
+				default:
+					line := scanner.Text()
+					fmt.Fprintf(w, "data: %s\n\n", line)
+					flusher.Flush()
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				log.Printf("Error scanning logs: %v", err)
+			}
+			return
+		}
+	}
+
+	// Fallback: Send a message explaining that logs are not supported
+	fmt.Fprintf(w, "data: ═══════════════════════════════════════════════════════════════\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: Logs are not available for Home Assistant via this dashboard.\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: \n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: Home Assistant logs can be viewed through:\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: - The Home Assistant web UI: Settings → System → Logs\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: - The Home Assistant CLI: ha core logs\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: - Direct file access: /config/home-assistant.log\n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: \n\n")
+	flusher.Flush()
+	fmt.Fprintf(w, "data: ═══════════════════════════════════════════════════════════════\n\n")
+	flusher.Flush()
+
+	// Keep connection open briefly so client receives all messages
+	<-r.Context().Done()
+}
+
 // DockerLogsHandler handles GET /api/logs requests for streaming Docker container logs.
 func DockerLogsHandler(w http.ResponseWriter, r *http.Request) {
 	containerName := r.URL.Query().Get("container")
@@ -717,6 +839,8 @@ func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
 		err = handleSystemdAction(ctx, cfg, req, action, sendEvent)
 	} else if req.Source == "traefik" {
 		err = handleTraefikAction(ctx, cfg, req, action, sendEvent)
+	} else if req.Source == "homeassistant" || req.Source == "homeassistant-addon" {
+		err = handleHomeAssistantAction(ctx, cfg, req, action, sendEvent)
 	} else {
 		sendEvent("error", "Unknown service source: "+req.Source)
 		sendEvent("complete", "failed")
@@ -952,4 +1076,91 @@ func handleTraefikAction(ctx context.Context, cfg *config.Config, req ServiceAct
 	sendEvent("status", "actual service is running.")
 
 	return fmt.Errorf("%s is not supported for Traefik services - these are external services managed outside this dashboard", action)
+}
+
+// handleHomeAssistantAction handles actions for Home Assistant services.
+// Supports: homeassistant core (restart only), ha-supervisor (no actions), ha-host (no actions), addon-* (start/stop/restart)
+func handleHomeAssistantAction(ctx context.Context, cfg *config.Config, req ServiceActionRequest, action string, sendEvent func(string, string)) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+
+	// Find the host config
+	host := cfg.GetHostByName(req.Host)
+	if host == nil {
+		return fmt.Errorf("host not found: %s", req.Host)
+	}
+
+	if !host.HasHomeAssistant() {
+		return fmt.Errorf("Home Assistant not configured for host: %s", req.Host)
+	}
+
+	haProvider, err := homeassistant.NewProvider(host)
+	if err != nil {
+		return fmt.Errorf("failed to create Home Assistant provider: %w", err)
+	}
+	if haProvider == nil {
+		return fmt.Errorf("Home Assistant provider is nil for host: %s", req.Host)
+	}
+
+	// Handle addon services
+	if strings.HasPrefix(req.ServiceName, "addon-") {
+		if !haProvider.HasSupervisorAPI() {
+			return fmt.Errorf("addon control requires HAOS with Supervisor API access")
+		}
+
+		slug := strings.TrimPrefix(req.ServiceName, "addon-")
+		sendEvent("status", fmt.Sprintf("Executing %s on addon %s...", action, slug))
+
+		if err := haProvider.AddonControl(ctx, slug, action); err != nil {
+			return fmt.Errorf("failed to %s addon %s: %w", action, slug, err)
+		}
+
+		sendEvent("status", fmt.Sprintf("Addon %s %s command sent successfully", slug, action))
+		return nil
+	}
+
+	// Handle supervisor and host services (no actions supported)
+	if req.ServiceName == "ha-supervisor" {
+		return fmt.Errorf("%s is not supported for Supervisor - it is managed by HAOS", action)
+	}
+	if req.ServiceName == "ha-host" {
+		return fmt.Errorf("%s is not supported for Host - use HAOS interface for host control", action)
+	}
+
+	// Handle core Home Assistant service
+	switch action {
+	case "restart":
+		sendEvent("status", "Triggering Home Assistant restart...")
+		sendEvent("status", "")
+		sendEvent("status", "Note: Home Assistant will restart and briefly become unavailable.")
+		sendEvent("status", "This typically takes 30-60 seconds to complete.")
+		sendEvent("status", "")
+
+		if err := haProvider.Restart(ctx); err != nil {
+			return fmt.Errorf("failed to restart Home Assistant: %w", err)
+		}
+
+		sendEvent("status", "Restart command sent successfully.")
+		sendEvent("status", "Home Assistant is now restarting...")
+		return nil
+
+	case "start":
+		sendEvent("status", "Start is not supported for Home Assistant.")
+		sendEvent("status", "")
+		sendEvent("status", "If Home Assistant is down, check the host where it's running.")
+		sendEvent("status", "You may need to SSH into the host or check the hardware.")
+		return fmt.Errorf("start is not supported for Home Assistant - if it's down, check the host")
+
+	case "stop":
+		sendEvent("status", "Stop is not supported for Home Assistant via this dashboard.")
+		sendEvent("status", "")
+		sendEvent("status", "Stopping Home Assistant would disable home automation.")
+		sendEvent("status", "If you need to stop it, use the HA web UI or CLI:")
+		sendEvent("status", "  ha core stop")
+		return fmt.Errorf("stop is not supported for Home Assistant - use the HA web UI if needed")
+
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
 }

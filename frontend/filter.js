@@ -226,6 +226,10 @@ export function applyFilter(callbacks = {}) {
                 return service.source === 'traefik' || 
                        (service.traefik_urls && service.traefik_urls.length > 0);
             }
+            if (servicesState.activeSourceFilter === 'homeassistant') {
+                return service.source === 'homeassistant' || 
+                       service.source === 'homeassistant-addon';
+            }
             return service.source === servicesState.activeSourceFilter;
         });
     }

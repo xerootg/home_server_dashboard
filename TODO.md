@@ -29,7 +29,7 @@
 | docker services can fill the disk with logs. we should be able to inspect the size of logs and delete specific logs by truncating the file. | ⬜ |
 | polkit rules should be used for remote hosts too | ⬜ |
 | support getting status of services registered in traefik but not in systemd/docker. examples are an external service that is reverse proxied to a host matcher. | ✅ Done |
-| add homeassistant status, allow restarting (including rebooting), updating | ⬜ |
+| add homeassistant status, allow restarting (including rebooting), updating | ✅ Done |
 | email should be sent to contacts as defined in services.json | ⬜ |
 | port should be defined, optionally as well as ip, from services.json | ⬜ |
 | a pipeline (github actions) that runs on every push which runs the tests, including integration (docker, systemd) | ⬜ |
