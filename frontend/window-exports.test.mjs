@@ -17,13 +17,24 @@ function getExportedFunctions() {
     const mainPath = join(__dirname, 'main.jsx');
     const content = readFileSync(mainPath, 'utf-8');
     
-    // Match the window.__dashboard = { ... } block
-    const dashboardMatch = content.match(/window\.__dashboard\s*=\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}/s);
-    if (!dashboardMatch) {
+    // Find the start of window.__dashboard = {
+    const startMatch = content.match(/window\.__dashboard\s*=\s*\{/);
+    if (!startMatch) {
         throw new Error('Could not find window.__dashboard assignment in main.jsx');
     }
     
-    const block = dashboardMatch[1];
+    // Find the matching closing brace by counting braces
+    const startIndex = startMatch.index + startMatch[0].length;
+    let braceCount = 1;
+    let endIndex = startIndex;
+    
+    for (let i = startIndex; i < content.length && braceCount > 0; i++) {
+        if (content[i] === '{') braceCount++;
+        if (content[i] === '}') braceCount--;
+        endIndex = i;
+    }
+    
+    const block = content.substring(startIndex, endIndex);
     const functions = new Set();
     
     // Match property names (key: value or shorthand key)
@@ -146,14 +157,23 @@ describe('Expected Window Exports', () => {
         'toggleTableCaseSensitivity',
         'toggleTableRegex',
         'toggleTableBangAndPipe',
+        'toggleTableSearchMode',
+        'navigateTableMatch',
         'confirmServiceAction',
         'executeServiceAction',
         'confirmLogFlush',
         'executeLogFlush',
         'showHelpModal',
         'scrollToService',
+        'scrollToTop',
         'logout',
-        'loadServices'
+        'loadServices',
+        'wsConnect',
+        'wsDisconnect',
+        'wsIsConnected',
+        'toggleColumnDropdown',
+        'toggleColumnVisibility',
+        'resetColumns'
     ];
     
     it('exports all expected functions', () => {

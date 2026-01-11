@@ -13,6 +13,7 @@ import { loadServices, checkAuthStatus, logout } from './api.js';
 import { showHelpModal } from './help.js';
 import { scrollToService } from './services.js';
 import { connect as wsConnect, disconnect as wsDisconnect, on as wsOn, isConnected as wsIsConnected } from './websocket.js';
+import { initColumnsState, toggleColumnDropdown, closeColumnDropdown, toggleColumnVisibility, resetColumnsToDefault, applyColumnVisibility, initClickOutsideHandler, getVisibleColumns, startColumnResize, resetColumnWidth } from './columns.js';
 
 // Create callbacks object for passing to modules
 const callbacks = {
@@ -76,7 +77,39 @@ if (typeof window !== 'undefined') {
         // WebSocket
         wsConnect,
         wsDisconnect,
-        wsIsConnected
+        wsIsConnected,
+        
+        // Column settings
+        toggleColumnDropdown,
+        toggleColumnVisibility: (columnId) => {
+            toggleColumnVisibility(columnId);
+            applyColumnVisibility(() => {
+                // Re-render services with updated columns
+                if (servicesState.all.length > 0) {
+                    renderServices(servicesState.all, true, callbacks);
+                    // Re-apply filters if active
+                    if (servicesState.activeFilter || servicesState.activeSourceFilter || Object.keys(servicesState.activeHostFilters).length > 0) {
+                        applyFilter(callbacks);
+                    }
+                }
+            });
+        },
+        resetColumns: () => {
+            resetColumnsToDefault();
+            applyColumnVisibility(() => {
+                // Re-render services with default columns
+                if (servicesState.all.length > 0) {
+                    renderServices(servicesState.all, true, callbacks);
+                    // Re-apply filters if active
+                    if (servicesState.activeFilter || servicesState.activeSourceFilter || Object.keys(servicesState.activeHostFilters).length > 0) {
+                        applyFilter(callbacks);
+                    }
+                }
+            });
+            toggleColumnDropdown(); // Re-render dropdown
+        },
+        startColumnResize,
+        resetColumnWidth
     };
 }
 
@@ -110,7 +143,28 @@ async function doLoadServices() {
  * Initialize the dashboard.
  */
 async function init() {
+    // Initialize click-outside handler for dropdowns
+    initClickOutsideHandler();
+    
+    // Listen for column changes (from drag-drop reordering)
+    if (typeof window !== 'undefined') {
+        window.addEventListener('columnsChanged', () => {
+            if (servicesState.all.length > 0) {
+                renderServices(servicesState.all, true, callbacks);
+                // Re-apply filters if active
+                if (servicesState.activeFilter || servicesState.activeSourceFilter || Object.keys(servicesState.activeHostFilters).length > 0) {
+                    applyFilter(callbacks);
+                }
+            }
+        });
+    }
+    
+    // Check auth first so we have the user ID for per-user column settings
     await checkAuthStatus();
+    
+    // Initialize column settings AFTER auth so we use the correct storage key
+    initColumnsState();
+    
     await doLoadServices();
     
     // Initialize table search UI (bangAndPipe is true by default)

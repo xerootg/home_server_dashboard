@@ -78,6 +78,7 @@ home_server_dashboard/
 │   ├── services.js                # Service lookup helpers (getServiceHostIP, scrollToService)
 │   ├── render.js                  # Rendering functions (renderPorts, renderServices, etc.)
 │   ├── filter.js                  # Filtering/sorting (sortServices, toggleFilter, applyFilter)
+│   ├── columns.js                 # Column visibility/ordering and localStorage persistence (mobile/desktop responsive)
 │   ├── logs.js                    # Logs viewer functionality (toggleLogs, SSE, log search)
 │   ├── table-search.js            # Table search UI functions
 │   ├── actions.js                 # Service action modal (confirmServiceAction, executeServiceAction)
@@ -91,6 +92,7 @@ home_server_dashboard/
 │   ├── search-core.test.mjs       # Tests for search-core.js
 │   ├── filter.test.mjs            # Tests for filter.js
 │   ├── render.test.mjs            # Tests for render.js
+│   ├── columns.test.mjs           # Tests for columns.js
 │   ├── websocket.test.mjs         # Tests for websocket.js
 │   └── window-exports.test.mjs    # Validates onclick handlers match exported functions
 ├── websocket/                     # WebSocket server for real-time updates
@@ -698,6 +700,16 @@ services:
 - Clickable stat cards to filter by status (running/stopped) with tristate support
 - **Host filter row**: Dynamic row of host badges below the status/source cards, showing all hosts with service counts
 - Sortable columns (click header to sort, click again to reverse)
+- **Column settings**: Configurable column visibility, order, and width
+  - Click column settings button (three-column icon) above the table to open dropdown
+  - Toggle column visibility with checkboxes (at least one column must remain visible)
+  - Drag-and-drop to reorder columns
+  - **Resize columns**: Drag the resize handle on the right edge of column headers to adjust width
+  - **Reset column width**: Double-click the resize handle to reset a column to auto width
+  - Reset button restores default column order, visibility, and widths
+  - Settings saved to localStorage per-user (key: `dashboard_columns_<userId>`) and persist across sessions
+  - **Responsive defaults**: Mobile (< 768px) shows only Service, Status, Actions; Desktop shows all columns
+  - **New columns**: When new columns are added to the codebase, they appear visible on desktop, hidden on mobile by default
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
 - **Port links**: Clickable badges after service name showing exposed ports (non-localhost only), opens HTTP URL on click
@@ -782,6 +794,8 @@ JavaScript tests cover the client-side functionality with modular test files:
 - **frontend/search-core.test.mjs** — Text matching, regex parsing, AST evaluation
 - **frontend/filter.test.mjs** — Service sorting functions
 - **frontend/render.test.mjs** — Port rendering, Traefik URLs, source icons
+- **frontend/columns.test.mjs** — Column visibility, ordering, cookie persistence
+- **frontend/websocket.test.mjs** — WebSocket client state and message parsing
 - **frontend/window-exports.test.mjs** — Validates HTML onclick handlers reference exported window.__dashboard functions
 
 | Package | Unit Tests | Integration Tests |

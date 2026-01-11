@@ -5,6 +5,7 @@
 import { escapeHtml, getStatusClass, formatLogSize } from './utils.js';
 import { getServiceHostIP, scrollToService } from './services.js';
 import { authState } from './state.js';
+import { getVisibleColumns, renderTableHeader as renderColumnsHeader } from './columns.js';
 
 /**
  * Render port badges for a service.
@@ -182,8 +183,14 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
     
     const tbody = document.getElementById('servicesTable');
     
+    // Get visible columns
+    const visibleColumns = getVisibleColumns();
+    
+    // Render table header with current column configuration
+    renderColumnsHeader();
+    
     if (!services || services.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center">No services found</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${visibleColumns.length}" class="text-center">No services found</td></tr>`;
         return;
     }
 
@@ -225,16 +232,38 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
         const logSizeHtml = renderLogSize(service);
         const hasTraefikIntegration = service.traefik_urls && service.traefik_urls.length > 0;
 
+        // Build cell content map
+        const cellContent = {
+            name: `${sourceIcons} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}${descriptionHtml}`,
+            project: escapeHtml(service.project),
+            host: hostBadge,
+            container: `<code class="small">${escapeHtml(service.container_name)}</code>`,
+            status: `<span class="badge badge-${statusClass}">${escapeHtml(service.status)}</span>`,
+            image: escapeHtml(service.image),
+            log_size: logSizeHtml,
+            actions: controlButtons
+        };
+        
+        // Build cells based on visible columns
+        const cells = visibleColumns.map(col => {
+            let cellClass = '';
+            let cellAttrs = '';
+            
+            if (col.id === 'image') {
+                cellClass = 'class="image-cell"';
+                cellAttrs = `title="${escapeHtml(service.image)}"`;
+            } else if (col.id === 'log_size') {
+                cellClass = 'class="logs-cell"';
+            } else if (col.id === 'actions') {
+                cellClass = 'class="controls-cell"';
+            }
+            
+            return `<td ${cellClass} ${cellAttrs}>${cellContent[col.id] || ''}</td>`;
+        }).join('');
+
         return `
             <tr class="service-row" data-container="${escapeHtml(service.container_name)}" data-service="${escapeHtml(service.name)}" data-source="${escapeHtml(service.source || 'docker')}" data-host="${escapeHtml(service.host || '')}" data-project="${escapeHtml(service.project || '')}" data-has-traefik="${hasTraefikIntegration}">
-                <td>${sourceIcons} ${escapeHtml(service.name)} ${portsHtml} ${traefikHtml}${descriptionHtml}</td>
-                <td>${escapeHtml(service.project)}</td>
-                <td>${hostBadge}</td>
-                <td><code class="small">${escapeHtml(service.container_name)}</code></td>
-                <td><span class="badge badge-${statusClass}">${escapeHtml(service.status)}</span></td>
-                <td class="image-cell" title="${escapeHtml(service.image)}">${escapeHtml(service.image)}</td>
-                <td class="logs-cell">${logSizeHtml}</td>
-                <td class="controls-cell">${controlButtons}</td>
+                ${cells}
             </tr>
         `;
     }).join('');
@@ -304,11 +333,17 @@ export function updateServiceRow(update, callbacks = {}) {
         return;
     }
     
-    // Update the status badge in the row
-    const statusCell = targetRow.querySelector('td:nth-child(5)');
-    if (statusCell) {
-        const statusClass = getStatusClass(update.current_state, update.status);
-        statusCell.innerHTML = `<span class="badge badge-${statusClass}">${escapeHtml(update.status)}</span>`;
+    // Find the status cell dynamically based on visible columns
+    const visibleColumns = getVisibleColumns();
+    const statusColIndex = visibleColumns.findIndex(col => col.id === 'status');
+    
+    // Update the status badge in the row (if status column is visible)
+    if (statusColIndex >= 0) {
+        const statusCell = targetRow.querySelector(`td:nth-child(${statusColIndex + 1})`);
+        if (statusCell) {
+            const statusClass = getStatusClass(update.current_state, update.status);
+            statusCell.innerHTML = `<span class="badge badge-${statusClass}">${escapeHtml(update.status)}</span>`;
+        }
     }
     
     // Update the control buttons to reflect new state

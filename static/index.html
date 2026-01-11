@@ -149,6 +149,13 @@
         </div>
 
         <div class="card">
+            <!-- Column settings button -->
+            <div class="column-settings-wrapper">
+                <button class="column-settings-btn" id="columnSettingsBtn" onclick="window.__dashboard.toggleColumnDropdown()" title="Configure columns">
+                    <i class="bi bi-layout-three-columns"></i>
+                </button>
+                <div class="column-settings-dropdown" id="columnSettingsDropdown" style="display: none;"></div>
+            </div>
             <div class="table-responsive">
                 <table class="table table-hover table-striped mb-0">
                     <thead class="table-dark">

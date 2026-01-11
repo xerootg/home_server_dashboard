@@ -196,6 +196,48 @@ th.sortable:hover {
     margin-left: 0.25em;
 }
 
+/* Resizable columns */
+th.resizable-col {
+    position: relative;
+    overflow: visible;
+}
+
+th.resizable-col .th-content {
+    display: inline;
+}
+
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 10;
+    transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+    background: rgba(78, 115, 223, 0.6);
+}
+
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    top: 25%;
+    bottom: 25%;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 1px;
+}
+
+.resize-handle:hover::after {
+    background: rgba(255, 255, 255, 0.6);
+}
+
 /* Table styling */
 .card {
     background: #16213e;
@@ -212,6 +254,20 @@ th.sortable:hover {
     --bs-table-striped-bg: #1a2848;
     --bs-table-hover-bg: #1a3050;
     margin-bottom: 0;
+    table-layout: fixed;
+}
+
+.table th,
+.table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Allow name column to wrap */
+.table td:first-child {
+    white-space: normal;
+    word-break: break-word;
 }
 
 .table thead.table-dark {
@@ -1181,3 +1237,135 @@ th.sortable:hover {
 .host-notification i {
     margin-right: 8px;
 }
+
+/* Column settings */
+.column-settings-wrapper {
+    position: relative;
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #0f3460;
+}
+
+.column-settings-btn {
+    background: transparent;
+    border: 1px solid #3a5a80;
+    border-radius: 4px;
+    padding: 0.35rem 0.6rem;
+    color: #adb5bd;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.column-settings-btn:hover {
+    background: rgba(13, 110, 253, 0.2);
+    border-color: #0d6efd;
+    color: #fff;
+}
+
+.column-settings-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 1rem;
+    width: 220px;
+    background: #1a2848;
+    border: 1px solid #3a5a80;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    margin-top: 4px;
+}
+
+.column-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #3a5a80;
+    font-weight: 500;
+    color: #fff;
+}
+
+.column-settings-reset {
+    background: transparent;
+    border: none;
+    color: #adb5bd;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.column-settings-reset:hover {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+}
+
+.column-settings-list {
+    list-style: none;
+    padding: 0.5rem 0;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.column-settings-item {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    cursor: grab;
+    transition: background 0.15s;
+}
+
+.column-settings-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.column-settings-item.dragging {
+    opacity: 0.5;
+    background: rgba(13, 110, 253, 0.2);
+}
+
+.column-settings-item.drag-over-top {
+    border-top: 2px solid #0d6efd;
+}
+
+.column-settings-item.drag-over-bottom {
+    border-bottom: 2px solid #0d6efd;
+}
+
+.column-drag-handle {
+    color: #6c757d;
+    margin-right: 0.5rem;
+    cursor: grab;
+}
+
+.column-drag-handle:active {
+    cursor: grabbing;
+}
+
+.column-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    flex: 1;
+    color: #eee;
+    font-size: 0.9rem;
+}
+
+.column-checkbox-label input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: #0d6efd;
+}
+
+.column-checkbox-label input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.column-checkbox-label input[type="checkbox"]:disabled + span {
+    opacity: 0.5;
+}
+

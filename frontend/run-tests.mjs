@@ -21,6 +21,7 @@ await import('./filter.test.mjs');
 await import('./render.test.mjs');
 await import('./websocket.test.mjs');
 await import('./window-exports.test.mjs');
+await import('./columns.test.mjs');
 
 // Print summary and exit
 printSummary();
