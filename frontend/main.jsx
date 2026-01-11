@@ -4,7 +4,7 @@
  */
 
 import { servicesState } from './state.js';
-import { renderServices, updateServiceRow, renderHostFilters } from './render.js';
+import { renderServices, updateServiceRow, renderHostFilters, showStatusToast } from './render.js';
 import { toggleFilter, toggleSourceFilter, toggleHostFilter, toggleSort, applyFilter, updateHostFilterUI } from './filter.js';
 import { toggleLogs, closeLogs, onLogsSearchInput, onLogsSearchKeydown, toggleLogsSearchMode, toggleLogsCaseSensitivity, toggleLogsRegex, toggleLogsBangAndPipe, navigateMatch } from './logs.js';
 import { onTableSearchInput, onTableSearchKeydown, clearTableSearch, toggleTableCaseSensitivity, toggleTableRegex, toggleTableBangAndPipe, toggleTableSearchMode, navigateTableMatch, updateTableBangPipeToggleUI } from './table-search.js';
@@ -109,7 +109,10 @@ if (typeof window !== 'undefined') {
             toggleColumnDropdown(); // Re-render dropdown
         },
         startColumnResize,
-        resetColumnWidth
+        resetColumnWidth,
+        
+        // Mobile status toast
+        showStatusToast
     };
 }
 
@@ -132,8 +135,10 @@ async function doLoadServices() {
         },
         onError: () => {
             if (typeof document !== 'undefined') {
+                const visibleColumns = getVisibleColumns();
+                const colspan = visibleColumns.length || 8;
                 document.getElementById('servicesTable').innerHTML = 
-                    '<tr><td colspan="6" class="text-center text-danger">Error loading services</td></tr>';
+                    `<tr><td colspan="${colspan}" class="text-center text-danger">Error loading services</td></tr>`;
             }
         }
     });

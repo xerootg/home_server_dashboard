@@ -1369,3 +1369,159 @@ th.resizable-col .th-content {
     opacity: 0.5;
 }
 
+/* Mobile responsive styles */
+@media (max-width: 767px) {
+    /* Prevent horizontal scrolling */
+    .table-responsive {
+        overflow-x: hidden;
+    }
+    
+    /* Use fixed table layout on mobile for predictable column widths */
+    .table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    
+    /* Default column styles on mobile */
+    .table th,
+    .table td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    /* Logs row should not affect column widths */
+    .table .logs-row td {
+        width: auto !important;
+        min-width: auto !important;
+        max-width: none !important;
+    }
+    
+    /* Service column: flexible, allows wrapping */
+    .table th[data-column-id="service"],
+    .table td.service-cell {
+        width: auto !important;
+        min-width: 0 !important;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        white-space: normal;
+    }
+    
+    /* Status column: fixed narrow width for dot */
+    .table th[data-column-id="status"],
+    .table td.status-cell {
+        width: 32px !important;
+        min-width: 32px !important;
+        max-width: 32px !important;
+        text-align: center;
+        padding-left: 4px !important;
+        padding-right: 4px !important;
+    }
+    
+    /* Actions column: fixed width for buttons */
+    .table th[data-column-id="actions"],
+    .table td.controls-cell {
+        width: 90px !important;
+        min-width: 90px !important;
+        max-width: 90px !important;
+        padding-left: 4px !important;
+        padding-right: 4px !important;
+    }
+    
+    /* Make control buttons smaller on mobile */
+    .service-controls .btn {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.75rem;
+    }
+    
+    /* Hide resize handles on mobile */
+    .resize-handle {
+        display: none;
+    }
+    
+    /* Status badge: show only colored dot on mobile */
+    .status-badge {
+        width: 16px;
+        height: 16px;
+        min-width: 16px;
+        padding: 0;
+        border-radius: 50%;
+        display: inline-block;
+        cursor: pointer;
+    }
+    
+    .status-badge .status-text {
+        display: none;
+    }
+    
+    /* Hide logs title and close button on mobile - only show search bar */
+    .logs-title,
+    .logs-close-btn {
+        display: none !important;
+    }
+    
+    .logs-header {
+        padding: 8px 10px;
+    }
+    
+    .logs-controls {
+        flex: 1;
+        gap: 8px;
+    }
+    
+    .logs-search-widget-wrapper {
+        flex: 1;
+    }
+    
+    .logs-status {
+        display: none;
+    }
+}
+
+/* Status toast for mobile */
+.status-toast {
+    display: none;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 80px;
+    z-index: 1050;
+    padding: 10px 20px;
+    background: #1e293b;
+    border: 1px solid #3a5a80;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    animation: toast-fade-in 0.2s ease-out;
+}
+
+.status-toast.show {
+    display: block;
+}
+
+.status-toast.running {
+    border-color: #198754;
+    background: linear-gradient(135deg, #1e293b 0%, #0d3320 100%);
+}
+
+.status-toast.stopped {
+    border-color: #dc3545;
+    background: linear-gradient(135deg, #1e293b 0%, #3d1a1a 100%);
+}
+
+.status-toast.unhealthy {
+    border-color: #fd7e14;
+    background: linear-gradient(135deg, #1e293b 0%, #3d2a0d 100%);
+}
+
+@keyframes toast-fade-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}

@@ -7,6 +7,35 @@ import { getServiceHostIP, scrollToService } from './services.js';
 import { authState } from './state.js';
 import { getVisibleColumns, renderTableHeader as renderColumnsHeader } from './columns.js';
 
+/** Toast timeout handle */
+let toastTimeout = null;
+
+/**
+ * Show a status toast message (for mobile).
+ * @param {string} message - Message to display
+ * @param {string} statusClass - Status class (running, stopped, unhealthy)
+ */
+export function showStatusToast(message, statusClass) {
+    if (typeof document === 'undefined') return;
+    
+    const toast = document.getElementById('statusToast');
+    if (!toast) return;
+    
+    // Clear any existing timeout
+    if (toastTimeout) {
+        clearTimeout(toastTimeout);
+    }
+    
+    // Set content and show
+    toast.textContent = message;
+    toast.className = 'status-toast show ' + statusClass;
+    
+    // Auto-hide after 2 seconds
+    toastTimeout = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 2000);
+}
+
 /**
  * Render port badges for a service.
  * @param {Array} ports - Array of port objects
@@ -238,7 +267,7 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
             project: escapeHtml(service.project),
             host: hostBadge,
             container: `<code class="small">${escapeHtml(service.container_name)}</code>`,
-            status: `<span class="badge badge-${statusClass}">${escapeHtml(service.status)}</span>`,
+            status: `<span class="badge badge-${statusClass} status-badge" title="${escapeHtml(service.status)}" onclick="event.stopPropagation(); window.__dashboard.showStatusToast('${escapeHtml(service.status).replace(/'/g, "\\'")}', '${statusClass}')"><span class="status-text">${escapeHtml(service.status)}</span></span>`,
             image: escapeHtml(service.image),
             log_size: logSizeHtml,
             actions: controlButtons
@@ -249,7 +278,11 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
             let cellClass = '';
             let cellAttrs = '';
             
-            if (col.id === 'image') {
+            if (col.id === 'name') {
+                cellClass = 'class="service-cell"';
+            } else if (col.id === 'status') {
+                cellClass = 'class="status-cell"';
+            } else if (col.id === 'image') {
                 cellClass = 'class="image-cell"';
                 cellAttrs = `title="${escapeHtml(service.image)}"`;
             } else if (col.id === 'log_size') {
@@ -342,7 +375,7 @@ export function updateServiceRow(update, callbacks = {}) {
         const statusCell = targetRow.querySelector(`td:nth-child(${statusColIndex + 1})`);
         if (statusCell) {
             const statusClass = getStatusClass(update.current_state, update.status);
-            statusCell.innerHTML = `<span class="badge badge-${statusClass}">${escapeHtml(update.status)}</span>`;
+            statusCell.innerHTML = `<span class="badge badge-${statusClass} status-badge" title="${escapeHtml(update.status)}" onclick="event.stopPropagation(); window.__dashboard.showStatusToast('${escapeHtml(update.status)}', '${statusClass}')"><span class="status-text">${escapeHtml(update.status)}</span></span>`;
         }
     }
     

@@ -683,6 +683,17 @@ services:
 
 **Tech Stack:** Bootstrap 5.3 + Bootstrap Icons + vanilla JavaScript
 
+**Responsive Design (CSS):**
+- **Mobile breakpoint:** `767px` (Bootstrap's md breakpoint - 1)
+- **Media query pattern:** `@media (max-width: 767px) { ... }`
+- **Mobile-specific rules in `static/style.css`:**
+  - `table-layout: auto` instead of `fixed` (allows columns to use full width)
+  - Column widths reset to `auto !important` (ignores persisted desktop widths)
+  - Resize handles hidden (`.resize-handle { display: none; }`)
+  - Logs viewer: title, close button, and status hidden (only search bar visible)
+- **JavaScript mobile detection:** `window.innerWidth < 768` (see `isMobile()` in `columns.js`)
+- **Column defaults:** Mobile shows only Service, Status, Actions; Desktop shows all columns
+
 **Data Flow:**
 1. Page loads → `loadServices()` fetches `/api/services`
 2. JavaScript renders table rows with source icons, host badges, status badges

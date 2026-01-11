@@ -6,6 +6,7 @@ import { escapeHtml } from './utils.js';
 import { logsState, resetLogsState } from './state.js';
 import { textMatches, evaluateAST, getSearchRegex, hasInversePrefix, findAllMatches } from './search-core.js';
 import { showHelpModal } from './help.js';
+import { getVisibleColumns } from './columns.js';
 
 /**
  * Toggle logs viewer for a service row.
@@ -33,9 +34,13 @@ export function toggleLogs(row) {
     const logsRow = document.createElement('tr');
     logsRow.className = 'logs-row';
     
+    // Get colspan based on visible columns
+    const visibleColumns = getVisibleColumns();
+    const colspan = visibleColumns.length || 6;
+    
     const hostInfo = host ? ` (${escapeHtml(host)})` : '';
     logsRow.innerHTML = `
-        <td colspan="6">
+        <td colspan="${colspan}">
             <div class="logs-inline">
                 <div class="logs-header">
                     <span class="logs-title"><i class="bi bi-journal-text"></i> Logs: ${escapeHtml(serviceName)}${hostInfo}</span>
@@ -73,7 +78,7 @@ export function toggleLogs(row) {
                             <div class="logs-error-popup hidden" id="logsErrorPopup"></div>
                         </div>
                         <span class="logs-status" id="logsStatus">Connecting...</span>
-                        <button class="btn btn-sm btn-danger" onclick="window.__dashboard.closeLogs()">
+                        <button class="btn btn-sm btn-danger logs-close-btn" onclick="window.__dashboard.closeLogs()">
                             <i class="bi bi-x-lg"></i>
                         </button>
                     </div>
