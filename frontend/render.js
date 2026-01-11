@@ -372,3 +372,52 @@ export function updateStatsFromDOM() {
     if (traefikEl) traefikEl.innerHTML = '<i class="bi bi-signpost-split text-warning"></i> ' + traefikCount;
     if (homeassistantEl) homeassistantEl.innerHTML = '<i class="bi bi-house-heart-fill text-primary"></i> ' + homeassistantCount;
 }
+
+/**
+ * Extract unique hosts from services.
+ * @param {Array} services - Array of service objects
+ * @returns {Array} Sorted array of unique host names
+ */
+export function getUniqueHosts(services) {
+    const hosts = new Set();
+    services.forEach(service => {
+        if (service.host) {
+            hosts.add(service.host);
+        }
+    });
+    return Array.from(hosts).sort();
+}
+
+/**
+ * Render host filter badges.
+ * @param {Array} services - Array of service objects to extract hosts from
+ */
+export function renderHostFilters(services) {
+    if (typeof document === 'undefined') return;
+    
+    const container = document.getElementById('hostFiltersContainer');
+    if (!container) return;
+    
+    const hosts = getUniqueHosts(services);
+    
+    if (hosts.length === 0) {
+        container.innerHTML = '<span class="text-muted small">No hosts</span>';
+        return;
+    }
+    
+    // Count services per host
+    const hostCounts = {};
+    services.forEach(service => {
+        const host = service.host || '';
+        hostCounts[host] = (hostCounts[host] || 0) + 1;
+    });
+    
+    const badges = hosts.map(host => {
+        const count = hostCounts[host] || 0;
+        return `<span class="host-filter-badge" data-host="${escapeHtml(host)}" onclick="window.__dashboard.toggleHostFilter('${escapeHtml(host)}')" title="Click to filter by ${escapeHtml(host)}">
+            <i class="bi bi-hdd-rack me-1"></i>${escapeHtml(host)} <span class="host-count">${count}</span>
+        </span>`;
+    }).join('');
+    
+    container.innerHTML = badges;
+}

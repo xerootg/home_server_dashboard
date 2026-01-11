@@ -86,6 +86,9 @@ export function toggleLogs(row) {
     // Insert after the clicked row
     row.after(logsRow);
     logsState.activeLogsRow = row;
+    
+    // Initialize the Bang & Pipe toggle button UI state
+    updateBangPipeToggleUI();
 
     // Connect to appropriate SSE endpoint
     const content = document.getElementById('logsContent');

@@ -38,3 +38,7 @@
 | Add a security fallback, using PAM as the auth verification, as a failover when oauth is offline. issue a JWT which is valid for the PAM result. Members of the docker group have access. | ✅ Done |
 | run fail2ban or something infront of auth to block requests from abusive IPs | ⬜ |
 | create a group concept, where a user can see some subset of services, with limited API access to those services, such as start/stop for the services configured in the configuration file | ✅ Done |
+| filter by host, new row of slugs, all filters should be tristate - include, disinclude, exclusive. default is include | ✅ Done |
+| bangandpipe by default | ✅ Done |
+| global search supports jumping to containers by match and not just search collapsing non-matching services | ✅ Done |
+| I want to add a favorites icon, based on https://icons.getbootstrap.com/icons/hdd-rack-fill/ and make the icon forest green | ✅ Done |

@@ -128,7 +128,8 @@ describe('Window Exports Validation', () => {
 describe('Expected Window Exports', () => {
     const expectedExports = [
         'toggleFilter',
-        'toggleSourceFilter', 
+        'toggleSourceFilter',
+        'toggleHostFilter',
         'toggleSort',
         'toggleLogs',
         'closeLogs',

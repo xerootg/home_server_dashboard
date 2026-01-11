@@ -3,8 +3,34 @@
  */
 
 import { describe, it, assert, assertEqual, assertDeepEqual } from './test-utils.mjs';
-import { sortServices, tableTextMatches, serviceMatchesTableSearch } from './filter.js';
-import { tableSearchState, resetTableSearchState } from './state.js';
+import { sortServices, tableTextMatches, serviceMatchesTableSearch, getNextFilterMode } from './filter.js';
+import { tableSearchState, resetTableSearchState, servicesState } from './state.js';
+
+describe('getNextFilterMode', () => {
+    it('starts with include from null', () => {
+        assertEqual(getNextFilterMode(null), 'include');
+    });
+
+    it('cycles from include to exclude', () => {
+        assertEqual(getNextFilterMode('include'), 'exclude');
+    });
+
+    it('cycles from exclude to exclusive', () => {
+        assertEqual(getNextFilterMode('exclude'), 'exclusive');
+    });
+
+    it('clears filter after exclusive (returns null)', () => {
+        assertEqual(getNextFilterMode('exclusive'), null);
+    });
+
+    it('starts with include from undefined', () => {
+        assertEqual(getNextFilterMode(undefined), 'include');
+    });
+
+    it('starts with include from invalid mode', () => {
+        assertEqual(getNextFilterMode('invalid'), 'include');
+    });
+});
 
 describe('sortServices', () => {
     const services = [
@@ -55,11 +81,13 @@ describe('sortServices', () => {
 describe('Table Search - Plain Text', () => {
     it('empty search matches everything', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         assertEqual(tableTextMatches('any text', ''), true);
     });
 
     it('case insensitive by default', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         assertEqual(tableTextMatches('Docker Container', 'docker'), true);
         assertEqual(tableTextMatches('DOCKER', 'docker'), true);
         assertEqual(tableTextMatches('docker', 'DOCKER'), true);
@@ -67,6 +95,7 @@ describe('Table Search - Plain Text', () => {
 
     it('case sensitive when enabled', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.caseSensitive = true;
         assertEqual(tableTextMatches('Docker Container', 'docker'), false);
         assertEqual(tableTextMatches('Docker Container', 'Docker'), true);
@@ -74,12 +103,14 @@ describe('Table Search - Plain Text', () => {
 
     it('partial matches work', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         assertEqual(tableTextMatches('my-container-name', 'container'), true);
         assertEqual(tableTextMatches('nginx:latest', 'nginx'), true);
     });
 
     it('no match returns false', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         assertEqual(tableTextMatches('docker container', 'systemd'), false);
     });
 });
@@ -87,6 +118,7 @@ describe('Table Search - Plain Text', () => {
 describe('Table Search - Regex Mode', () => {
     it('basic regex pattern', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('container-123', 'container-\\d+'), true);
         assertEqual(tableTextMatches('container-abc', 'container-\\d+'), false);
@@ -94,6 +126,7 @@ describe('Table Search - Regex Mode', () => {
 
     it('regex with anchors', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('nginx', '^nginx$'), true);
         assertEqual(tableTextMatches('my-nginx', '^nginx$'), false);
@@ -101,6 +134,7 @@ describe('Table Search - Regex Mode', () => {
 
     it('regex alternation', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('docker', 'docker|systemd'), true);
         assertEqual(tableTextMatches('systemd', 'docker|systemd'), true);
@@ -109,6 +143,7 @@ describe('Table Search - Regex Mode', () => {
 
     it('inverse regex with ! prefix', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('systemd', '!docker'), true);
         assertEqual(tableTextMatches('docker', '!docker'), false);
@@ -116,6 +151,7 @@ describe('Table Search - Regex Mode', () => {
 
     it('escaped ! at start matches literal !', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('!important', '\\!important'), true);
         assertEqual(tableTextMatches('!other', '\\!important'), false);
@@ -123,6 +159,7 @@ describe('Table Search - Regex Mode', () => {
 
     it('invalid regex returns false', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         assertEqual(tableTextMatches('text', '[invalid'), false);
     });
@@ -208,54 +245,63 @@ describe('Table Search - Service Matching', () => {
 
     it('matches service name', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'nginx';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches project', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'web-stack';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches host', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'nas';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches container name', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'web-nginx-1';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches status', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'healthy';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches state', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'running';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches image', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'alpine';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches source', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'docker';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
     });
 
     it('matches port number', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = '8080';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
         tableSearchState.term = '8443';
@@ -264,6 +310,7 @@ describe('Table Search - Service Matching', () => {
 
     it('matches traefik hostname', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'nginx.example.com';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
         tableSearchState.term = 'web.mysite.org';
@@ -272,6 +319,7 @@ describe('Table Search - Service Matching', () => {
 
     it('matches partial traefik hostname', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'example.com';
         assertEqual(serviceMatchesTableSearch(sampleService), true);
         tableSearchState.term = 'mysite';
@@ -280,12 +328,14 @@ describe('Table Search - Service Matching', () => {
 
     it('no match returns false', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.term = 'postgresql';
         assertEqual(serviceMatchesTableSearch(sampleService), false);
     });
 
     it('handles missing fields gracefully', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         const minimalService = { name: 'test' };
         tableSearchState.term = 'test';
         assertEqual(serviceMatchesTableSearch(minimalService), true);
@@ -295,6 +345,7 @@ describe('Table Search - Service Matching', () => {
 
     it('regex matching on services', () => {
         resetTableSearchState();
+        tableSearchState.bangAndPipe = false;
         tableSearchState.regex = true;
         tableSearchState.term = 'nginx.*alpine';
         assertEqual(serviceMatchesTableSearch(sampleService), true);

@@ -9,7 +9,7 @@ import (
 	"io/fs"
 )
 
-//go:embed static/app.js static/app.js.map static/index.html static/style.css
+//go:embed static/app.js static/app.js.map static/index.html static/style.css static/favicon.svg
 var staticFiles embed.FS
 
 //go:embed docs/*

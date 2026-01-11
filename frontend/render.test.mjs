@@ -5,7 +5,7 @@
 import { describe, it, assert, assertEqual, assertDeepEqual } from './test-utils.mjs';
 import { servicesState } from './state.js';
 import { getServiceHostIP } from './services.js';
-import { renderPorts, renderTraefikURLs, getSourceIcons, renderControlButtons } from './render.js';
+import { renderPorts, renderTraefikURLs, getSourceIcons, renderControlButtons, getUniqueHosts } from './render.js';
 
 describe('getServiceHostIP', () => {
     it('returns host_ip for matching service', () => {
@@ -231,5 +231,42 @@ describe('renderControlButtons', () => {
         const result = renderControlButtons(service);
         assert(result.includes('btn-restart'), 'Should include restart button');
         assert(result.includes('bi-arrow-clockwise'), 'Should include restart icon');
+    });
+});
+
+describe('getUniqueHosts', () => {
+    it('returns empty array for empty services', () => {
+        const result = getUniqueHosts([]);
+        assertDeepEqual(result, []);
+    });
+
+    it('extracts unique hosts from services', () => {
+        const services = [
+            { name: 'svc1', host: 'host1' },
+            { name: 'svc2', host: 'host2' },
+            { name: 'svc3', host: 'host1' }
+        ];
+        const result = getUniqueHosts(services);
+        assertDeepEqual(result, ['host1', 'host2']);
+    });
+
+    it('sorts hosts alphabetically', () => {
+        const services = [
+            { name: 'svc1', host: 'zeta' },
+            { name: 'svc2', host: 'alpha' },
+            { name: 'svc3', host: 'mango' }
+        ];
+        const result = getUniqueHosts(services);
+        assertDeepEqual(result, ['alpha', 'mango', 'zeta']);
+    });
+
+    it('ignores services without host', () => {
+        const services = [
+            { name: 'svc1', host: 'host1' },
+            { name: 'svc2' },
+            { name: 'svc3', host: '' }
+        ];
+        const result = getUniqueHosts(services);
+        assertDeepEqual(result, ['host1']);
     });
 });

@@ -4,10 +4,10 @@
  */
 
 import { servicesState } from './state.js';
-import { renderServices, updateServiceRow } from './render.js';
-import { toggleFilter, toggleSourceFilter, toggleSort, applyFilter } from './filter.js';
+import { renderServices, updateServiceRow, renderHostFilters } from './render.js';
+import { toggleFilter, toggleSourceFilter, toggleHostFilter, toggleSort, applyFilter, updateHostFilterUI } from './filter.js';
 import { toggleLogs, closeLogs, onLogsSearchInput, onLogsSearchKeydown, toggleLogsSearchMode, toggleLogsCaseSensitivity, toggleLogsRegex, toggleLogsBangAndPipe, navigateMatch } from './logs.js';
-import { onTableSearchInput, onTableSearchKeydown, clearTableSearch, toggleTableCaseSensitivity, toggleTableRegex, toggleTableBangAndPipe } from './table-search.js';
+import { onTableSearchInput, onTableSearchKeydown, clearTableSearch, toggleTableCaseSensitivity, toggleTableRegex, toggleTableBangAndPipe, toggleTableSearchMode, navigateTableMatch, updateTableBangPipeToggleUI } from './table-search.js';
 import { confirmServiceAction, executeServiceAction } from './actions.js';
 import { loadServices, checkAuthStatus, logout } from './api.js';
 import { showHelpModal } from './help.js';
@@ -28,6 +28,7 @@ if (typeof window !== 'undefined') {
         // Filter functions
         toggleFilter: (filter) => toggleFilter(filter, callbacks),
         toggleSourceFilter: (source) => toggleSourceFilter(source, callbacks),
+        toggleHostFilter: (host) => toggleHostFilter(host, callbacks),
         toggleSort: (column) => toggleSort(column, callbacks),
         
         // Logs functions
@@ -43,11 +44,13 @@ if (typeof window !== 'undefined') {
         
         // Table search functions
         onTableSearchInput: (term) => onTableSearchInput(term, callbacks),
-        onTableSearchKeydown,
+        onTableSearchKeydown: (event) => onTableSearchKeydown(event, callbacks),
         clearTableSearch: () => clearTableSearch(callbacks),
         toggleTableCaseSensitivity: () => toggleTableCaseSensitivity(callbacks),
         toggleTableRegex: () => toggleTableRegex(callbacks),
         toggleTableBangAndPipe: () => toggleTableBangAndPipe(callbacks),
+        toggleTableSearchMode: () => toggleTableSearchMode(callbacks),
+        navigateTableMatch,
         
         // Service actions
         confirmServiceAction,
@@ -58,6 +61,7 @@ if (typeof window !== 'undefined') {
         
         // Navigation
         scrollToService,
+        scrollToTop,
         
         // Auth
         logout,
@@ -80,8 +84,12 @@ async function doLoadServices() {
         onSuccess: (services) => {
             renderServices(services, true, callbacks);
             
+            // Render host filter badges
+            renderHostFilters(services);
+            updateHostFilterUI();
+            
             // Re-apply filter if one is active
-            if (servicesState.activeFilter || servicesState.activeSourceFilter) {
+            if (servicesState.activeFilter || servicesState.activeSourceFilter || Object.keys(servicesState.activeHostFilters).length > 0) {
                 applyFilter(callbacks);
             }
         },
@@ -101,8 +109,14 @@ async function init() {
     await checkAuthStatus();
     await doLoadServices();
     
+    // Initialize table search UI (bangAndPipe is true by default)
+    updateTableBangPipeToggleUI();
+    
     // Initialize WebSocket connection for real-time updates
     initWebSocket();
+    
+    // Initialize sticky search bar detection
+    initStickySearchBar();
 }
 
 /**
@@ -151,6 +165,53 @@ function initWebSocket() {
     
     // Start the connection
     wsConnect();
+}
+
+/**
+ * Initialize sticky search bar behavior using IntersectionObserver.
+ * Adds 'is-sticky' class when the search bar is pinned to the top.
+ * Also controls the scroll-to-top button visibility.
+ */
+function initStickySearchBar() {
+    if (typeof document === 'undefined') return;
+    
+    const searchContainer = document.querySelector('.table-search-container');
+    const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+    if (!searchContainer) return;
+    
+    // Create a sentinel element to detect when search bar becomes sticky
+    const sentinel = document.createElement('div');
+    sentinel.className = 'table-search-sentinel';
+    sentinel.style.cssText = 'height: 1px; width: 100%; pointer-events: none;';
+    searchContainer.parentNode.insertBefore(sentinel, searchContainer);
+    
+    // Use IntersectionObserver to detect when sentinel goes out of view
+    const observer = new IntersectionObserver(
+        (entries) => {
+            entries.forEach(entry => {
+                // When sentinel is not visible, search bar is sticky
+                if (!entry.isIntersecting) {
+                    searchContainer.classList.add('is-sticky');
+                    if (scrollToTopBtn) scrollToTopBtn.style.display = 'flex';
+                } else {
+                    searchContainer.classList.remove('is-sticky');
+                    if (scrollToTopBtn) scrollToTopBtn.style.display = 'none';
+                }
+            });
+        },
+        { threshold: 0, rootMargin: '0px' }
+    );
+    
+    observer.observe(sentinel);
+}
+
+/**
+ * Scroll to the top of the page smoothly.
+ */
+function scrollToTop() {
+    if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 /**

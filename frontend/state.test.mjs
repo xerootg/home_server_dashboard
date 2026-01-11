@@ -21,7 +21,7 @@ describe('logsState', () => {
         assertEqual(logsState.searchTerm, '');
         assertEqual(logsState.caseSensitive, false);
         assertEqual(logsState.regex, false);
-        assertEqual(logsState.bangAndPipe, false);
+        assertEqual(logsState.bangAndPipe, true);
         assertEqual(logsState.mode, 'filter');
     });
 });
@@ -44,7 +44,7 @@ describe('resetLogsState', () => {
         assertEqual(logsState.searchTerm, '');
         assertEqual(logsState.caseSensitive, false);
         assertEqual(logsState.regex, false);
-        assertEqual(logsState.bangAndPipe, false);
+        assertEqual(logsState.bangAndPipe, true);
         assertEqual(logsState.mode, 'filter');
         assertEqual(logsState.currentMatchIndex, -1);
         assertEqual(logsState.error, '');
@@ -64,7 +64,7 @@ describe('tableSearchState', () => {
         assertEqual(tableSearchState.term, '');
         assertEqual(tableSearchState.caseSensitive, false);
         assertEqual(tableSearchState.regex, false);
-        assertEqual(tableSearchState.bangAndPipe, false);
+        assertEqual(tableSearchState.bangAndPipe, true);
     });
 });
 
@@ -84,7 +84,7 @@ describe('resetTableSearchState', () => {
         assertEqual(tableSearchState.term, '');
         assertEqual(tableSearchState.caseSensitive, false);
         assertEqual(tableSearchState.regex, false);
-        assertEqual(tableSearchState.bangAndPipe, false);
+        assertEqual(tableSearchState.bangAndPipe, true);
         assertEqual(tableSearchState.error, '');
     });
 });

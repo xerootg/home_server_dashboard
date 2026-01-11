@@ -12,7 +12,7 @@ export const logsState = {
     searchTerm: '',
     caseSensitive: false,
     regex: false,
-    bangAndPipe: false,
+    bangAndPipe: true,
     mode: 'filter', // 'filter' or 'find'
     currentMatchIndex: -1,
     allMatches: [],
@@ -22,12 +22,21 @@ export const logsState = {
 };
 
 /**
+ * Filter state values:
+ * - null: include (default, no filtering)
+ * - 'include': explicitly include, same as active filter
+ * - 'exclude': exclude matches from results
+ * - 'exclusive': only show matches (same as include for single filters)
+ */
+
+/**
  * Table/services state
  */
 export const servicesState = {
     all: [],
-    activeFilter: null,
-    activeSourceFilter: null,
+    activeFilter: null,           // Status filter: null | { status: 'running'|'stopped', mode: 'include'|'exclude'|'exclusive' }
+    activeSourceFilter: null,     // Source filter: null | { source: string, mode: 'include'|'exclude'|'exclusive' }
+    activeHostFilters: {},        // Host filters: { [hostname]: 'include'|'exclude'|'exclusive' }
     sortColumn: null,
     sortDirection: 'asc'
 };
@@ -39,10 +48,13 @@ export const tableSearchState = {
     term: '',
     caseSensitive: false,
     regex: false,
-    bangAndPipe: false,
+    bangAndPipe: true,
     error: '',
     ast: null,
-    debounceTimer: null
+    debounceTimer: null,
+    mode: 'filter', // 'filter' or 'find'
+    currentMatchIndex: -1,
+    allMatches: [] // Array of { service, index } for navigation
 };
 
 /**
@@ -88,7 +100,7 @@ export function resetLogsState() {
     logsState.searchTerm = '';
     logsState.caseSensitive = false;
     logsState.regex = false;
-    logsState.bangAndPipe = false;
+    logsState.bangAndPipe = true;
     logsState.mode = 'filter';
     logsState.currentMatchIndex = -1;
     logsState.allMatches = [];
@@ -107,9 +119,12 @@ export function resetTableSearchState() {
     tableSearchState.term = '';
     tableSearchState.caseSensitive = false;
     tableSearchState.regex = false;
-    tableSearchState.bangAndPipe = false;
+    tableSearchState.bangAndPipe = true;
     tableSearchState.error = '';
     tableSearchState.ast = null;
+    tableSearchState.mode = 'filter';
+    tableSearchState.currentMatchIndex = -1;
+    tableSearchState.allMatches = [];
     if (tableSearchState.debounceTimer) {
         clearTimeout(tableSearchState.debounceTimer);
         tableSearchState.debounceTimer = null;

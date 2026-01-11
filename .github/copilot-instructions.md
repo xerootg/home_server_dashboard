@@ -2,7 +2,7 @@
 
 REQUIRED: Update this document with any architectural or design information about the project.
 REQUIRED: If you are working on a todo and find an issue, add it to the bottom of the todo list. the status should be "needs triage" and not checkmark or empty checkbox.
-REQUIRED: All tests must pass, including integration tests, before any item in todo can be marked done. if there are no tests for the feature, add them, and they must pass. The ONLY exception to this rule is for html/css/js files that are purely frontend and have no backend component.
+REQUIRED: All tests must pass, including integration tests, before any item in todo can be marked done. if there are no tests for the feature, add them, and they must pass.
 
 A lightweight Go web dashboard for monitoring Docker Compose services and systemd services across multiple hosts.
 
@@ -685,7 +685,13 @@ services:
 6. Click again or ✕ → closes logs and disconnects SSE
 
 **UI Features:**
-- Clickable stat cards to filter by status (running/stopped)
+- **Tristate filters**: All filter cards (status, source, host) support tristate cycling by clicking:
+  - **Include** (blue border): Show matching items (first click)
+  - **Exclude** (red border): Hide matching items (second click)
+  - **Exclusive** (green border): Show ONLY matching items (third click)
+  - Fourth click clears the filter (back to no filter)
+- Clickable stat cards to filter by status (running/stopped) with tristate support
+- **Host filter row**: Dynamic row of host badges below the status/source cards, showing all hosts with service counts
 - Sortable columns (click header to sort, click again to reverse)
 - Source icons: gear (systemd) vs box (Docker)
 - Host badges showing which host the service runs on
@@ -696,11 +702,17 @@ services:
 - **Traefik links**: Green clickable badges showing Traefik-exposed hostnames, opens HTTPS URL on click
 - **Service descriptions**: Muted text below service name showing description (from Docker label `home.server.dashboard.description` or systemd unit description)
 - **Table search**: VS Code-style search widget below filter cards
+  - **Sticky behavior**: Floats at top of screen when scrolled out of view, with transparency until hover/focus
+  - **Scroll position preservation**: Switching between Filter/Find modes preserves scroll position (scrolls to bottom if content shrinks)
+  - Two modes: Filter mode (hides non-matching) and Find mode (navigate between matches)
+  - Mode toggle button switches between funnel (filter) and search (find) icons
+  - Find mode: up/down navigation buttons, Enter/Shift+Enter keyboard shortcuts, current match highlighting
   - Filters across all columns (name, project, host, container, status, image, source)
   - Supports plain text, regex (with `!` prefix for inverse), and Bang & Pipe mode
   - Case sensitivity toggle
-  - Match count display
+  - Match count display (filter: "X of Y", find: "1 of N")
   - Reuses the same AST evaluation as log search
+- **Scroll-to-top button**: Floating button in lower right corner, appears when scrolled down, smooth scrolls to top
 - **Service control buttons**: Start/Stop/Restart buttons in Actions column
   - Shows confirmation modal before executing action
   - Real-time status updates via SSE during action execution

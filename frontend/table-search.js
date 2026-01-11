@@ -39,10 +39,18 @@ export function onTableSearchInput(searchTerm, callbacks = {}) {
 /**
  * Handle keydown in table search input.
  * @param {KeyboardEvent} event - The keyboard event
+ * @param {Object} callbacks - Callback functions
  */
-export function onTableSearchKeydown(event) {
+export function onTableSearchKeydown(event, callbacks = {}) {
     if (event.key === 'Escape') {
-        clearTableSearch();
+        clearTableSearch(callbacks);
+    } else if (event.key === 'Enter' && tableSearchState.mode === 'find') {
+        event.preventDefault();
+        if (event.shiftKey) {
+            navigateTableMatch(-1);
+        } else {
+            navigateTableMatch(1);
+        }
     }
 }
 
@@ -54,6 +62,8 @@ export function clearTableSearch(callbacks = {}) {
     tableSearchState.term = '';
     tableSearchState.ast = null;
     tableSearchState.error = '';
+    tableSearchState.currentMatchIndex = -1;
+    tableSearchState.allMatches = [];
     
     const input = document.getElementById('tableSearchInput');
     if (input) input.value = '';
@@ -61,6 +71,7 @@ export function clearTableSearch(callbacks = {}) {
     const clearBtn = document.getElementById('tableClearBtn');
     if (clearBtn) clearBtn.style.display = 'none';
     
+    clearCurrentMatchHighlight();
     hideTableError();
     applyFilter(callbacks);
 }
@@ -231,4 +242,135 @@ export function updateTableBangPipeToggleUI() {
         btn.classList.remove('active');
         btn.title = 'Bang & Pipe mode: Use !&| operators';
     }
+}
+
+/**
+ * Toggle between filter and find mode.
+ * Preserves scroll position to avoid jarring jumps.
+ * @param {Object} callbacks - Callback functions
+ */
+export function toggleTableSearchMode(callbacks = {}) {
+    // Store scroll position before mode change
+    const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+    
+    tableSearchState.mode = tableSearchState.mode === 'filter' ? 'find' : 'filter';
+    tableSearchState.currentMatchIndex = -1;
+    updateTableModeToggleUI();
+    applyFilter(callbacks);
+    
+    // Restore scroll position after DOM updates
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+        // Use requestAnimationFrame to ensure DOM has updated
+        requestAnimationFrame(() => {
+            const newDocumentHeight = document.documentElement.scrollHeight;
+            // If we would be past the new bottom, scroll to bottom instead
+            const maxScroll = newDocumentHeight - window.innerHeight;
+            const targetScroll = Math.min(scrollY, Math.max(0, maxScroll));
+            window.scrollTo(0, targetScroll);
+        });
+    }
+}
+
+/**
+ * Update mode toggle button UI.
+ */
+export function updateTableModeToggleUI() {
+    const modeBtn = document.getElementById('tableModeToggle');
+    const navBtns = document.getElementById('tableSearchNav');
+    const input = document.getElementById('tableSearchInput');
+    
+    if (!modeBtn) return;
+    
+    if (tableSearchState.mode === 'filter') {
+        modeBtn.innerHTML = '<i class="bi bi-funnel-fill"></i>';
+        modeBtn.title = 'Filter mode - hiding non-matching services. Click to switch to Find mode.';
+        modeBtn.classList.remove('active');
+        if (navBtns) navBtns.style.display = 'none';
+        if (input) input.placeholder = 'Search services...';
+    } else {
+        modeBtn.innerHTML = '<i class="bi bi-search"></i>';
+        modeBtn.title = 'Find mode - jump between matches. Click to switch to Filter mode.';
+        modeBtn.classList.add('active');
+        if (navBtns) navBtns.style.display = 'flex';
+        if (input) input.placeholder = 'Find services...';
+    }
+}
+
+/**
+ * Navigate to next/previous match in find mode.
+ * @param {number} direction - 1 for next, -1 for previous
+ */
+export function navigateTableMatch(direction) {
+    if (tableSearchState.allMatches.length === 0) return;
+    
+    // Clear current highlight
+    clearCurrentMatchHighlight();
+    
+    // Update index with wrapping
+    tableSearchState.currentMatchIndex += direction;
+    if (tableSearchState.currentMatchIndex < 0) {
+        tableSearchState.currentMatchIndex = tableSearchState.allMatches.length - 1;
+    } else if (tableSearchState.currentMatchIndex >= tableSearchState.allMatches.length) {
+        tableSearchState.currentMatchIndex = 0;
+    }
+    
+    highlightCurrentTableMatch();
+    updateTableMatchCountUI();
+}
+
+/**
+ * Clear current match highlight from service rows.
+ */
+export function clearCurrentMatchHighlight() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.service-row.current-match').forEach(el => {
+        el.classList.remove('current-match');
+    });
+}
+
+/**
+ * Highlight the current match and scroll to it.
+ */
+export function highlightCurrentTableMatch() {
+    if (tableSearchState.currentMatchIndex < 0 || 
+        tableSearchState.currentMatchIndex >= tableSearchState.allMatches.length) return;
+    
+    const match = tableSearchState.allMatches[tableSearchState.currentMatchIndex];
+    if (!match || !match.row) return;
+    
+    match.row.classList.add('current-match');
+    match.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/**
+ * Update match count display for find mode.
+ */
+export function updateTableMatchCountUI() {
+    if (typeof document === 'undefined') return;
+    
+    const countEl = document.getElementById('tableMatchCount');
+    if (!countEl) return;
+    
+    if (!tableSearchState.term) {
+        countEl.textContent = '';
+        countEl.classList.remove('no-matches');
+        return;
+    }
+    
+    if (tableSearchState.error) {
+        countEl.textContent = 'Invalid';
+        countEl.classList.add('no-matches');
+        return;
+    }
+    
+    if (tableSearchState.mode === 'find') {
+        if (tableSearchState.allMatches.length === 0) {
+            countEl.textContent = 'No matches';
+            countEl.classList.add('no-matches');
+        } else {
+            countEl.textContent = `${tableSearchState.currentMatchIndex + 1} of ${tableSearchState.allMatches.length}`;
+            countEl.classList.remove('no-matches');
+        }
+    }
+    // Filter mode count is handled by filter.js updateTableMatchCountUI
 }
