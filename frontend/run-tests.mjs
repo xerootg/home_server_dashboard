@@ -19,6 +19,7 @@ await import('./state.test.mjs');
 await import('./search-core.test.mjs');
 await import('./filter.test.mjs');
 await import('./render.test.mjs');
+await import('./websocket.test.mjs');
 await import('./window-exports.test.mjs');
 
 // Print summary and exit

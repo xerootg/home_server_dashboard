@@ -889,3 +889,80 @@ th.sortable:hover {
     font-weight: bold;
     font-size: 1.1em;
 }
+
+/* WebSocket status indicator */
+.ws-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.ws-status i {
+    font-size: 14px;
+}
+
+.ws-connected {
+    color: #2ecc71;
+}
+
+.ws-connected i {
+    animation: pulse-connected 2s infinite;
+}
+
+.ws-disconnected {
+    color: #6c757d;
+}
+
+.ws-connecting {
+    color: #f39c12;
+}
+
+.ws-connecting i {
+    animation: pulse-connecting 1s infinite;
+}
+
+.ws-error {
+    color: #e74c3c;
+}
+
+@keyframes pulse-connected {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes pulse-connecting {
+    0%, 100% { opacity: 0.5; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* Service row update animation */
+.service-row.service-updated {
+    animation: highlight-update 2s ease-out;
+}
+
+@keyframes highlight-update {
+    0% { background-color: rgba(46, 204, 113, 0.3); }
+    100% { background-color: transparent; }
+}
+
+/* Notification container */
+.notification-container {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    z-index: 9999;
+    max-width: 400px;
+}
+
+.host-notification {
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.host-notification i {
+    margin-right: 8px;
+}

@@ -4,7 +4,7 @@
  */
 
 import { servicesState } from './state.js';
-import { renderServices } from './render.js';
+import { renderServices, updateServiceRow } from './render.js';
 import { toggleFilter, toggleSourceFilter, toggleSort, applyFilter } from './filter.js';
 import { toggleLogs, closeLogs, onLogsSearchInput, onLogsSearchKeydown, toggleLogsSearchMode, toggleLogsCaseSensitivity, toggleLogsRegex, toggleLogsBangAndPipe, navigateMatch } from './logs.js';
 import { onTableSearchInput, onTableSearchKeydown, clearTableSearch, toggleTableCaseSensitivity, toggleTableRegex, toggleTableBangAndPipe } from './table-search.js';
@@ -12,6 +12,7 @@ import { confirmServiceAction, executeServiceAction } from './actions.js';
 import { loadServices, checkAuthStatus, logout } from './api.js';
 import { showHelpModal } from './help.js';
 import { scrollToService } from './services.js';
+import { connect as wsConnect, disconnect as wsDisconnect, on as wsOn, isConnected as wsIsConnected } from './websocket.js';
 
 // Create callbacks object for passing to modules
 const callbacks = {
@@ -62,7 +63,12 @@ if (typeof window !== 'undefined') {
         logout,
         
         // Refresh
-        loadServices: doLoadServices
+        loadServices: doLoadServices,
+        
+        // WebSocket
+        wsConnect,
+        wsDisconnect,
+        wsIsConnected
     };
 }
 
@@ -94,6 +100,92 @@ async function doLoadServices() {
 async function init() {
     await checkAuthStatus();
     await doLoadServices();
+    
+    // Initialize WebSocket connection for real-time updates
+    initWebSocket();
+}
+
+/**
+ * Initialize WebSocket and register event handlers.
+ */
+function initWebSocket() {
+    // Handle service state updates
+    wsOn('service_update', (payload) => {
+        // Update the specific service row reactively
+        updateServiceRow(payload, callbacks);
+        
+        // Also update the service in our state array
+        const service = servicesState.all.find(s => 
+            s.name === payload.service_name && 
+            s.host === payload.host && 
+            s.source === payload.source
+        );
+        if (service) {
+            service.state = payload.current_state;
+            service.status = payload.status;
+        }
+    });
+    
+    // Handle host unreachable events
+    wsOn('host_unreachable', (payload) => {
+        console.log('Host unreachable:', payload.host, payload.reason);
+        showHostNotification('error', `Host ${payload.host} is unreachable: ${payload.reason}`);
+    });
+    
+    // Handle host recovered events
+    wsOn('host_recovered', (payload) => {
+        console.log('Host recovered:', payload.host);
+        showHostNotification('success', `Host ${payload.host} is back online`);
+        // Refresh services to get updated state
+        doLoadServices();
+    });
+    
+    // Handle connection events
+    wsOn('connect', () => {
+        console.log('WebSocket connected - real-time updates enabled');
+    });
+    
+    wsOn('disconnect', () => {
+        console.log('WebSocket disconnected - will reconnect automatically');
+    });
+    
+    // Start the connection
+    wsConnect();
+}
+
+/**
+ * Show a temporary notification for host events.
+ * @param {string} type - 'error' or 'success'
+ * @param {string} message - Notification message
+ */
+function showHostNotification(type, message) {
+    if (typeof document === 'undefined') return;
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type === 'error' ? 'danger' : 'success'} alert-dismissible fade show host-notification`;
+    notification.innerHTML = `
+        <i class="bi bi-${type === 'error' ? 'exclamation-triangle' : 'check-circle'}"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // Find or create notification container
+    let container = document.getElementById('notificationContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notificationContainer';
+        container.className = 'notification-container';
+        document.body.appendChild(container);
+    }
+    
+    container.appendChild(notification);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 150);
+    }, 5000);
 }
 
 // Initialize on DOM ready

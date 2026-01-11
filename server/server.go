@@ -8,16 +8,18 @@ import (
 
 	"home_server_dashboard/auth"
 	"home_server_dashboard/handlers"
+	"home_server_dashboard/websocket"
 )
 
 // Config holds server configuration options.
 type Config struct {
 	Port         string
-	StaticDir    string       // Deprecated: use StaticFS instead
+	StaticDir    string           // Deprecated: use StaticFS instead
 	ConfigPath   string
-	StaticFS     fs.FS        // Embedded static filesystem
-	DocsFS       fs.FS        // Embedded docs filesystem
-	AuthProvider *auth.Provider // OIDC auth provider (nil if auth disabled)
+	StaticFS     fs.FS            // Embedded static filesystem
+	DocsFS       fs.FS            // Embedded docs filesystem
+	AuthProvider *auth.Provider   // OIDC auth provider (nil if auth disabled)
+	WebSocketHub *websocket.Hub   // WebSocket hub for real-time updates
 }
 
 // DefaultConfig returns the default server configuration.
@@ -102,6 +104,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/services/start", protect(handlers.ServiceActionHandler))
 	s.mux.HandleFunc("/api/services/stop", protect(handlers.ServiceActionHandler))
 	s.mux.HandleFunc("/api/services/restart", protect(handlers.ServiceActionHandler))
+
+	// WebSocket endpoint for real-time updates (protected)
+	if s.config.WebSocketHub != nil {
+		s.mux.HandleFunc("/ws", protect(s.config.WebSocketHub.Handler()))
+	}
 }
 
 // Handler returns the HTTP handler for the server.

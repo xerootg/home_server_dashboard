@@ -68,6 +68,17 @@ export const authState = {
 };
 
 /**
+ * WebSocket state
+ */
+export const websocketState = {
+    socket: null,
+    status: 'disconnected', // 'disconnected', 'connecting', 'connected', 'reconnecting', 'error'
+    reconnecting: false,
+    reconnectDelay: 1000,
+    reconnectTimer: null
+};
+
+/**
  * Reset logs state to defaults.
  * Called when closing logs viewer.
  */

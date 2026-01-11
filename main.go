@@ -21,6 +21,7 @@ import (
 	"home_server_dashboard/polkit"
 	"home_server_dashboard/server"
 	"home_server_dashboard/sudoers"
+	"home_server_dashboard/websocket"
 )
 
 // getConfigPath returns the configuration file path.
@@ -133,6 +134,11 @@ func main() {
 	// Initialize event-driven infrastructure
 	eventBus := events.NewBus(true) // async event dispatch
 
+	// Initialize WebSocket hub for real-time updates
+	wsHub := websocket.NewHub(eventBus)
+	wsHub.Start()
+	serverCfg.WebSocketHub = wsHub
+
 	// Initialize notifier manager
 	notifierMgr := notifiers.NewManager(eventBus)
 
@@ -161,6 +167,9 @@ func main() {
 
 		// Stop monitor first to prevent new events
 		serviceMonitor.Stop()
+
+		// Stop WebSocket hub
+		wsHub.Stop()
 
 		// Close notifier manager
 		notifierMgr.Close()

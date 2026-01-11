@@ -225,3 +225,150 @@ export function renderServices(services, updateStats = true, callbacks = {}) {
         document.getElementById('homeassistantCount').innerHTML = '<i class="bi bi-house-heart-fill text-primary"></i> ' + homeassistantCount;
     }
 }
+
+/**
+ * Update a single service row reactively without re-rendering the entire table.
+ * @param {Object} update - Service update payload from WebSocket
+ * @param {string} update.host - Host name
+ * @param {string} update.service_name - Service name
+ * @param {string} update.source - Service source (docker, systemd, etc.)
+ * @param {string} update.current_state - New state
+ * @param {string} update.status - New status text
+ * @param {Object} callbacks - Callback functions for row click handlers
+ */
+export function updateServiceRow(update, callbacks = {}) {
+    if (typeof document === 'undefined') return;
+    
+    const tbody = document.getElementById('servicesTable');
+    if (!tbody) return;
+    
+    // Find the row for this service
+    const rows = tbody.querySelectorAll('.service-row');
+    let targetRow = null;
+    
+    for (const row of rows) {
+        const rowService = row.dataset.service;
+        const rowHost = row.dataset.host;
+        const rowSource = row.dataset.source;
+        
+        // Match by service name, host, and source
+        if (rowService === update.service_name && 
+            rowHost === update.host && 
+            rowSource === update.source) {
+            targetRow = row;
+            break;
+        }
+    }
+    
+    if (!targetRow) {
+        console.log('WebSocket: service row not found for update', update);
+        return;
+    }
+    
+    // Update the status badge in the row
+    const statusCell = targetRow.querySelector('td:nth-child(5)');
+    if (statusCell) {
+        const statusClass = getStatusClass(update.current_state, update.status);
+        statusCell.innerHTML = `<span class="badge badge-${statusClass}">${escapeHtml(update.status)}</span>`;
+    }
+    
+    // Update the control buttons to reflect new state
+    const controlsCell = targetRow.querySelector('.controls-cell');
+    if (controlsCell) {
+        const isRunning = update.current_state.toLowerCase() === 'running';
+        const containerName = escapeHtml(targetRow.dataset.container);
+        const serviceName = escapeHtml(targetRow.dataset.service);
+        const source = escapeHtml(targetRow.dataset.source);
+        const host = escapeHtml(targetRow.dataset.host);
+        const project = escapeHtml(targetRow.dataset.project);
+        
+        let buttons = '<div class="service-controls">';
+        
+        if (!isRunning) {
+            buttons += `<button class="service-control-btn btn-start" onclick="window.__dashboard.confirmServiceAction(event, 'start', '${containerName}', '${serviceName}', '${source}', '${host}', '${project}')" title="Start service"><i class="bi bi-play-fill"></i></button>`;
+        }
+        
+        if (isRunning) {
+            buttons += `<button class="service-control-btn btn-stop" onclick="window.__dashboard.confirmServiceAction(event, 'stop', '${containerName}', '${serviceName}', '${source}', '${host}', '${project}')" title="Stop service"><i class="bi bi-stop-fill"></i></button>`;
+        }
+        
+        buttons += `<button class="service-control-btn btn-restart" onclick="window.__dashboard.confirmServiceAction(event, 'restart', '${containerName}', '${serviceName}', '${source}', '${host}', '${project}')" title="Restart service"><i class="bi bi-arrow-clockwise"></i></button>`;
+        
+        buttons += '</div>';
+        controlsCell.innerHTML = buttons;
+    }
+    
+    // Add visual feedback for the update
+    targetRow.classList.add('service-updated');
+    setTimeout(() => {
+        targetRow.classList.remove('service-updated');
+    }, 2000);
+    
+    // Update stats counters
+    updateStatsFromDOM();
+}
+
+/**
+ * Update stats counters by scanning the current table state.
+ * This is more accurate than maintaining separate state.
+ */
+export function updateStatsFromDOM() {
+    if (typeof document === 'undefined') return;
+    
+    const tbody = document.getElementById('servicesTable');
+    if (!tbody) return;
+    
+    const rows = tbody.querySelectorAll('.service-row');
+    let running = 0;
+    let stopped = 0;
+    let dockerCount = 0;
+    let systemdCount = 0;
+    let traefikCount = 0;
+    let homeassistantCount = 0;
+    
+    rows.forEach(row => {
+        // Check status badge
+        const statusBadge = row.querySelector('td:nth-child(5) .badge');
+        if (statusBadge) {
+            if (statusBadge.classList.contains('badge-running')) {
+                running++;
+            } else {
+                stopped++;
+            }
+        }
+        
+        // Count by source
+        const source = row.dataset.source;
+        if (source === 'docker') {
+            dockerCount++;
+        } else if (source === 'systemd') {
+            systemdCount++;
+        } else if (source === 'traefik') {
+            traefikCount++;
+        } else if (source === 'homeassistant' || source === 'homeassistant-addon') {
+            homeassistantCount++;
+        }
+        
+        // Count traefik integrations
+        if (source !== 'traefik' && row.dataset.hasTraefik === 'true') {
+            traefikCount++;
+        }
+    });
+    
+    // Update DOM
+    const totalEl = document.getElementById('totalCount');
+    const runningEl = document.getElementById('runningCount');
+    const stoppedEl = document.getElementById('stoppedCount');
+    const dockerEl = document.getElementById('dockerCount');
+    const systemdEl = document.getElementById('systemdCount');
+    const traefikEl = document.getElementById('traefikCount');
+    const homeassistantEl = document.getElementById('homeassistantCount');
+    
+    if (totalEl) totalEl.textContent = rows.length;
+    if (runningEl) runningEl.textContent = running;
+    if (stoppedEl) stoppedEl.textContent = stopped;
+    if (dockerEl) dockerEl.innerHTML = '<i class="bi bi-box text-primary"></i> ' + dockerCount;
+    if (systemdEl) systemdEl.innerHTML = '<i class="bi bi-gear-fill text-info"></i> ' + systemdCount;
+    if (traefikEl) traefikEl.innerHTML = '<i class="bi bi-signpost-split text-warning"></i> ' + traefikCount;
+    if (homeassistantEl) homeassistantEl.innerHTML = '<i class="bi bi-house-heart-fill text-primary"></i> ' + homeassistantCount;
+}

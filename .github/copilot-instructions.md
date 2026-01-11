@@ -83,6 +83,7 @@ home_server_dashboard/
 │   ├── actions.js                 # Service action modal (confirmServiceAction, executeServiceAction)
 │   ├── api.js                     # API/auth functions (loadServices, checkAuthStatus)
 │   ├── help.js                    # Help modal (showHelpModal)
+│   ├── websocket.js               # WebSocket client for real-time updates
 │   ├── run-tests.mjs              # Test runner entry point
 │   ├── test-utils.mjs             # Test framework (describe, it, assert)
 │   ├── utils.test.mjs             # Tests for utils.js
@@ -90,7 +91,11 @@ home_server_dashboard/
 │   ├── search-core.test.mjs       # Tests for search-core.js
 │   ├── filter.test.mjs            # Tests for filter.js
 │   ├── render.test.mjs            # Tests for render.js
+│   ├── websocket.test.mjs         # Tests for websocket.js
 │   └── window-exports.test.mjs    # Validates onclick handlers match exported functions
+├── websocket/                     # WebSocket server for real-time updates
+│   ├── websocket.go               # Hub, Client, Message types, event broadcasting
+│   └── websocket_test.go          # WebSocket unit tests
 ├── static/                        # Static assets (embedded into binary)
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
@@ -109,7 +114,7 @@ home_server_dashboard/
 - **Responsibilities:**
   - Load configuration from `services.json`
   - Initialize OIDC authentication provider (if configured)
-  - Initialize event bus, monitor, and notifiers
+  - Initialize event bus, monitor, notifiers, and WebSocket hub
   - Create and start HTTP server
   - Handle graceful shutdown
 - **Files:** `main.go`, `main_test.go`
@@ -248,6 +253,30 @@ home_server_dashboard/
   - `PriorityHigh (8)` — Service stopped, host recovered
   - `PriorityNormal (5)` — Service started, test messages
   - `PriorityLow (2)` — Other state changes
+
+### `websocket` Package
+- **Purpose:** WebSocket server for real-time service state updates to browser clients
+- **Key Types:**
+  - `Hub` — Manages connected WebSocket clients and broadcasts messages
+  - `Client` — Individual WebSocket connection with read/write pumps
+  - `Message` — WebSocket message with Type, Timestamp, Payload
+  - `MessageType` — Enum: `service_update`, `host_unreachable`, `host_recovered`, `ping`
+  - `ServiceUpdatePayload` — Service state change details
+  - `HostEventPayload` — Host event details
+- **Key Functions:**
+  - `NewHub(eventBus)` — Creates hub subscribed to event bus
+  - `Start()` — Begins hub's main loop and event subscriptions
+  - `Stop()` — Gracefully shuts down hub and closes connections
+  - `Handler()` — Returns HTTP handler for WebSocket upgrade
+  - `ClientCount()` — Returns number of connected clients
+- **Features:**
+  - Subscribes to event bus (ServiceStateChanged, HostUnreachable, HostRecovered)
+  - Broadcasts events to all connected WebSocket clients
+  - Ping/pong keepalive with configurable timeouts
+  - Automatic reconnection support on client side
+  - JSON message format for easy client-side parsing
+- **Dependencies:**
+  - `github.com/gorilla/websocket` — WebSocket implementation
 
 ### `query` Package
 - **Purpose:** Compiles "Bang & Pipe" search expressions into ASTs for client-side evaluation
@@ -510,6 +539,7 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 - `POST /api/services/start` — Start a service (SSE stream of status updates)
 - `POST /api/services/stop` — Stop a service (SSE stream of status updates)
 - `POST /api/services/restart` — Restart a service (Docker uses compose down/up, SSE stream of status updates)
+- `GET /ws` — WebSocket endpoint for real-time service state updates (protected)
 
 **Application Layers:**
 | Layer | Package | Responsibility |
@@ -519,6 +549,7 @@ Group filtering applies **only to OIDC authentication** (not local/PAM users). I
 | Auth | `auth` | OIDC authentication, session management |
 | Handlers | `handlers` | Request processing, response generation |
 | Services | `services/*` | Docker/systemd/Traefik provider implementations |
+| WebSocket | `websocket` | Real-time updates via WebSocket |
 | Config | `config` | Configuration loading and access |
 | Query | `query` | Bang & Pipe expression parsing |
 

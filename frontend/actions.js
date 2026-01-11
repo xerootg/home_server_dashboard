@@ -81,9 +81,8 @@ export function confirmServiceAction(event, action, containerName, serviceName, 
 
 /**
  * Execute the pending service action with SSE status updates.
- * @param {Function} loadServices - Function to reload services after action
  */
-export function executeServiceAction(loadServices) {
+export function executeServiceAction() {
     if (!actionState.pending) return;
     
     const { action, containerName, serviceName, source, host, project } = actionState.pending;
@@ -132,7 +131,7 @@ export function executeServiceAction(loadServices) {
                     currentEvent = line.substring(7).trim();
                 } else if (line.startsWith('data: ')) {
                     const data = line.substring(6);
-                    handleActionEvent(currentEvent || 'message', data, loadServices);
+                    handleActionEvent(currentEvent || 'message', data);
                 }
             }
         }
@@ -165,9 +164,8 @@ export function executeServiceAction(loadServices) {
  * Handle SSE events from service action.
  * @param {string} eventType - The event type
  * @param {string} data - The event data
- * @param {Function} loadServices - Function to reload services
  */
-function handleActionEvent(eventType, data, loadServices) {
+function handleActionEvent(eventType, data) {
     switch (eventType) {
         case 'status':
             addActionLogLine(data, 'status');
@@ -179,7 +177,7 @@ function handleActionEvent(eventType, data, loadServices) {
             document.getElementById('actionSpinner').style.display = 'none';
             if (data === 'success') {
                 addActionLogLine('✓ Action completed successfully', 'success');
-                startCountdown(loadServices);
+                startCountdown();
             } else {
                 addActionLogLine('✗ Action failed', 'error');
                 showActionRetry();
@@ -218,15 +216,15 @@ function showActionRetry() {
 }
 
 /**
- * Start countdown and then refresh services.
- * @param {Function} loadServices - Function to reload services
+ * Start countdown and then close modal.
+ * WebSocket handles real-time updates, no refresh needed.
  */
-function startCountdown(loadServices) {
+function startCountdown() {
     const countdownEl = document.getElementById('actionCountdown');
     const valueEl = document.getElementById('countdownValue');
     countdownEl.style.display = 'block';
     
-    let count = 5;
+    let count = 3;
     valueEl.textContent = count;
     
     const interval = setInterval(() => {
@@ -235,16 +233,16 @@ function startCountdown(loadServices) {
         
         if (count <= 0) {
             clearInterval(interval);
-            closeActionModalAndRefresh(loadServices);
+            closeActionModal();
         }
     }, 1000);
 }
 
 /**
- * Close the action modal and refresh services data.
- * @param {Function} loadServices - Function to reload services
+ * Close the action modal.
+ * WebSocket handles real-time updates, no refresh needed.
  */
-export function closeActionModalAndRefresh(loadServices) {
+export function closeActionModal() {
     // Close modal
     const modal = getActionModal();
     if (modal) {
@@ -253,9 +251,4 @@ export function closeActionModalAndRefresh(loadServices) {
     
     // Clear pending action
     actionState.pending = null;
-    
-    // Refresh services data without page reload
-    if (loadServices) {
-        loadServices();
-    }
 }
