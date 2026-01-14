@@ -41,6 +41,8 @@
 | bangandpipe by default | ✅ Done |
 | global search supports jumping to containers by match and not just search collapsing non-matching services | ✅ Done |
 | I want to add a favorites icon, based on https://icons.getbootstrap.com/icons/hdd-rack-fill/ and make the icon forest green | ✅ Done |
+| Fix SSH connection leaks in Home Assistant integration - providers were not calling Close() | ✅ Done |
+| Add resource leak analyzer (analysis/closerleak) for go vet-style detection of io.Closer leaks | ✅ Done |
 | Add omada status | |
 
 ## cut

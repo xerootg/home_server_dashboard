@@ -675,6 +675,7 @@ func (m *Monitor) pollHomeAssistant() {
 		if haProvider == nil {
 			continue
 		}
+		defer haProvider.Close()
 
 		state, status, err := haProvider.CheckHealth(ctx)
 		if err != nil {

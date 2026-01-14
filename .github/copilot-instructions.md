@@ -98,6 +98,12 @@ home_server_dashboard/
 ├── websocket/                     # WebSocket server for real-time updates
 │   ├── websocket.go               # Hub, Client, Message types, event broadcasting
 │   └── websocket_test.go          # WebSocket unit tests
+├── analysis/                      # Static analysis tools
+│   └── closerleak/                # io.Closer resource leak detector
+│       ├── closerleak.go          # Main analyzer implementation
+│       ├── closerleak_test.go     # Unit tests with testdata fixtures
+│       ├── closerleak_integration_test.go  # Integration test scanning production code
+│       └── testdata/              # Test fixtures for analyzer
 ├── static/                        # Static assets (embedded into binary)
 │   ├── index.html                 # Dashboard HTML structure (Bootstrap 5)
 │   ├── style.css                  # Custom dark theme styling
@@ -281,6 +287,25 @@ home_server_dashboard/
   - JSON message format for easy client-side parsing
 - **Dependencies:**
   - `github.com/gorilla/websocket` — WebSocket implementation
+
+### `analysis/closerleak` Package
+- **Purpose:** Static analyzer that detects `io.Closer` resource leaks (unclosed files, connections, etc.)
+- **Key Types:**
+  - `Analyzer` — The `golang.org/x/tools/go/analysis.Analyzer` instance
+- **Key Functions:**
+  - `Run(pass)` — Analyzer entry point, inspects AST for unclosed closers
+- **Features:**
+  - Detects calls returning `io.Closer` where `Close()` is never called
+  - Tracks defer statements, explicit Close() calls, and control flow
+  - Ignores false positives: struct field storage, returned closers, function args, composite literals
+  - Integration test (`TestNoResourceLeaksInProductionCode`) fails if production code has leaks
+- **Usage:**
+  ```bash
+  # Run as integration test (fails on leaks in production code)
+  go test -tags=integration ./analysis/closerleak/...
+  ```
+- **Dependencies:**
+  - `golang.org/x/tools/go/analysis` — Go static analysis framework
 
 ### `query` Package
 - **Purpose:** Compiles "Bang & Pipe" search expressions into ASTs for client-side evaluation
@@ -790,6 +815,7 @@ go test -tags=integration ./...
 Integration tests use the `//go:build integration` build tag and test real system interactions:
 - **services/docker/** — Real Docker API calls, container listing, log streaming
 - **services/systemd/** — Real D-Bus connections, journalctl log streaming
+- **analysis/closerleak/** — Scans production code for io.Closer leaks (fails if any found)
 - **js_integration_test.go** — Runs JavaScript unit tests via Node.js
 
 ### JavaScript Tests
@@ -825,5 +851,6 @@ JavaScript tests cover the client-side functionality with modular test files:
 | services/systemd | ✅ | ✅ |
 | services/traefik | ✅ | — |
 | services/homeassistant | ✅ | — |
+| analysis/closerleak | ✅ | ✅ |
 | frontend | ✅ (Node.js) | — |
 

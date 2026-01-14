@@ -102,6 +102,7 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		if haProvider == nil {
 			continue
 		}
+		defer haProvider.Close()
 
 		haServices, err := haProvider.GetServices(ctx)
 		if err != nil {
@@ -568,6 +569,9 @@ func HomeAssistantLogsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			break
 		}
+	}
+	if provider != nil {
+		defer provider.Close()
 	}
 
 	// Get logs from the provider
@@ -1102,6 +1106,7 @@ func handleHomeAssistantAction(ctx context.Context, cfg *config.Config, req Serv
 	if haProvider == nil {
 		return fmt.Errorf("Home Assistant provider is nil for host: %s", req.Host)
 	}
+	defer haProvider.Close()
 
 	// Handle addon services
 	if strings.HasPrefix(req.ServiceName, "addon-") {
