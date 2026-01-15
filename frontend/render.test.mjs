@@ -232,6 +232,53 @@ describe('renderControlButtons', () => {
         assert(result.includes('btn-restart'), 'Should include restart button');
         assert(result.includes('bi-arrow-clockwise'), 'Should include restart icon');
     });
+
+    it('renders lock icon for readonly services', () => {
+        const service = {
+            state: 'running',
+            container_name: 'nas-dashboard.service',
+            name: 'nas-dashboard.service',
+            source: 'systemd',
+            host: 'host1',
+            project: 'systemd',
+            readonly: true
+        };
+        const result = renderControlButtons(service);
+        assert(result.includes('bi-lock'), 'Should include lock icon');
+        assert(!result.includes('btn-start'), 'Should not include start button');
+        assert(!result.includes('btn-stop'), 'Should not include stop button');
+        assert(!result.includes('btn-restart'), 'Should not include restart button');
+    });
+
+    it('renders normal buttons when readonly is false', () => {
+        const service = {
+            state: 'running',
+            container_name: 'docker.service',
+            name: 'docker.service',
+            source: 'systemd',
+            host: 'host1',
+            project: 'systemd',
+            readonly: false
+        };
+        const result = renderControlButtons(service);
+        assert(!result.includes('bi-lock'), 'Should not include lock icon');
+        assert(result.includes('btn-stop'), 'Should include stop button');
+        assert(result.includes('btn-restart'), 'Should include restart button');
+    });
+
+    it('renders normal buttons when readonly is undefined', () => {
+        const service = {
+            state: 'running',
+            container_name: 'docker.service',
+            name: 'docker.service',
+            source: 'systemd',
+            host: 'host1',
+            project: 'systemd'
+        };
+        const result = renderControlButtons(service);
+        assert(!result.includes('bi-lock'), 'Should not include lock icon');
+        assert(result.includes('btn-stop'), 'Should include stop button');
+    });
 });
 
 describe('renderLogSize', () => {

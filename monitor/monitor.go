@@ -1,6 +1,8 @@
 // Package monitor provides service monitoring and state change detection.
 // It uses native event sources (Docker events API, systemd D-Bus signals) where
 // available, with polling as a fallback for remote hosts and Home Assistant.
+// When Watchtower is configured, it delays notifications for containers being
+// updated to avoid false-positive alerts during updates.
 package monitor
 
 import (
@@ -20,6 +22,7 @@ import (
 	"home_server_dashboard/services"
 	"home_server_dashboard/services/homeassistant"
 	"home_server_dashboard/services/systemd"
+	"home_server_dashboard/services/watchtower"
 )
 
 // ServiceState tracks the last known state of a service.
@@ -32,6 +35,14 @@ type ServiceState struct {
 type HostState struct {
 	Reachable bool
 	LastError string
+}
+
+// PendingNotification tracks a service state change that is pending notification.
+// This is used to delay notifications during Watchtower updates.
+type PendingNotification struct {
+	Event     *events.ServiceStateChangedEvent
+	ExpiresAt time.Time
+	Cancelled bool
 }
 
 // Monitor watches services and emits events when states change.
@@ -52,6 +63,11 @@ type Monitor struct {
 	// Event source connections
 	dockerClient *client.Client
 	dbusConn     *dbus.Conn
+
+	// Watchtower integration
+	watchtowerClients    map[string]*watchtower.Client       // key: hostname
+	pendingNotifications map[string]*PendingNotification     // key: "host:servicename"
+	pendingMu            sync.Mutex
 }
 
 // Option is a functional option for configuring the monitor.
@@ -75,13 +91,27 @@ func WithSkipFirstEvent(skip bool) Option {
 // New creates a new service monitor.
 func New(cfg *config.Config, bus *events.Bus, opts ...Option) *Monitor {
 	m := &Monitor{
-		cfg:            cfg,
-		bus:            bus,
-		pollInterval:   60 * time.Second, // Polling fallback for remote hosts
-		serviceStates:  make(map[string]ServiceState),
-		hostStates:     make(map[string]HostState),
-		stopCh:         make(chan struct{}),
-		skipFirstEvent: true, // Don't alert on initial discovery
+		cfg:                  cfg,
+		bus:                  bus,
+		pollInterval:         60 * time.Second, // Polling fallback for remote hosts
+		serviceStates:        make(map[string]ServiceState),
+		hostStates:           make(map[string]HostState),
+		stopCh:               make(chan struct{}),
+		skipFirstEvent:       true, // Don't alert on initial discovery
+		watchtowerClients:    make(map[string]*watchtower.Client),
+		pendingNotifications: make(map[string]*PendingNotification),
+	}
+
+	// Initialize Watchtower clients for hosts that have it configured
+	for i := range cfg.Hosts {
+		host := &cfg.Hosts[i]
+		if host.HasWatchtower() {
+			client := watchtower.NewClient(host)
+			if client != nil {
+				m.watchtowerClients[host.Name] = client
+				log.Printf("Monitor: Watchtower client initialized for host %s (%s)", host.Name, client.BaseURL())
+			}
+		}
 	}
 
 	for _, opt := range opts {
@@ -124,8 +154,14 @@ func (m *Monitor) Start() {
 		go m.pollHomeAssistantHosts()
 	}
 
-	log.Printf("Service monitor started (Docker events: %v, systemd D-Bus: %v, remote polling: %v, HA polling: %v)",
-		m.dockerClient != nil, m.dbusConn != nil, m.hasRemoteHosts(), m.hasHomeAssistantHosts())
+	// Start pending notification processor (for Watchtower integration)
+	if len(m.watchtowerClients) > 0 {
+		m.wg.Add(1)
+		go m.processPendingNotifications()
+	}
+
+	log.Printf("Service monitor started (Docker events: %v, systemd D-Bus: %v, remote polling: %v, HA polling: %v, watchtower hosts: %d)",
+		m.dockerClient != nil, m.dbusConn != nil, m.hasRemoteHosts(), m.hasHomeAssistantHosts(), len(m.watchtowerClients))
 }
 
 // Stop stops the monitor and waits for it to finish.
@@ -524,12 +560,12 @@ func (m *Monitor) markDiscoveryComplete() {
 }
 
 // updateServiceState checks if a service state changed and emits an event if so.
+// For Docker services on hosts with Watchtower configured, it will delay
+// "stopped" notifications to avoid false positives during container updates.
 func (m *Monitor) updateServiceState(svc services.ServiceInfo) {
 	key := svc.Host + ":" + svc.Name
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	oldState, exists := m.serviceStates[key]
 	newState := ServiceState{
 		State:  svc.State,
@@ -538,11 +574,13 @@ func (m *Monitor) updateServiceState(svc services.ServiceInfo) {
 
 	// Update stored state
 	m.serviceStates[key] = newState
+	skipFirst := m.skipFirstEvent
+	m.mu.Unlock()
 
 	// Check if state changed
 	if exists && oldState.State != newState.State {
 		// Don't emit events during initial discovery
-		if !m.skipFirstEvent {
+		if !skipFirst {
 			event := events.NewServiceStateChangedEvent(
 				svc.Host,
 				svc.Name,
@@ -551,9 +589,19 @@ func (m *Monitor) updateServiceState(svc services.ServiceInfo) {
 				newState.State,
 				newState.Status,
 			)
-			m.bus.Publish(event)
-			log.Printf("Monitor: service state change - %s on %s: %s → %s",
-				svc.Name, svc.Host, oldState.State, newState.State)
+
+			// Check if we should delay this notification for Watchtower
+			if m.shouldDelayNotification(svc, oldState.State, newState.State) {
+				m.queuePendingNotification(key, event)
+				log.Printf("Monitor: service state change (pending) - %s on %s: %s → %s (waiting for Watchtower timeout)",
+					svc.Name, svc.Host, oldState.State, newState.State)
+			} else {
+				// Check if this service came back up - cancel any pending notification
+				m.cancelPendingNotification(key)
+				m.bus.Publish(event)
+				log.Printf("Monitor: service state change - %s on %s: %s → %s",
+					svc.Name, svc.Host, oldState.State, newState.State)
+			}
 		}
 	} else if !exists {
 		// First time seeing this service
@@ -697,4 +745,129 @@ func (m *Monitor) pollHomeAssistant() {
 	}
 
 	m.markDiscoveryComplete()
+}
+
+// shouldDelayNotification determines if a service state change should be delayed.
+// Returns true if:
+// - The service is a Docker service
+// - The host has Watchtower configured
+// - The service went from "running" to "stopped"
+func (m *Monitor) shouldDelayNotification(svc services.ServiceInfo, oldState, newState string) bool {
+	// Only delay Docker service stopped notifications
+	if svc.Source != "docker" {
+		return false
+	}
+
+	// Only delay running -> stopped transitions
+	if oldState != "running" || newState != "stopped" {
+		return false
+	}
+
+	// Check if host has Watchtower configured
+	_, hasWatchtower := m.watchtowerClients[svc.Host]
+	return hasWatchtower
+}
+
+// queuePendingNotification adds a notification to the pending queue.
+func (m *Monitor) queuePendingNotification(key string, event *events.ServiceStateChangedEvent) {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+
+	// Get timeout from host config
+	host := m.cfg.GetHostByName(event.Host)
+	timeout := 120 // default
+	if host != nil {
+		timeout = host.GetWatchtowerUpdateTimeout()
+	}
+
+	m.pendingNotifications[key] = &PendingNotification{
+		Event:     event,
+		ExpiresAt: time.Now().Add(time.Duration(timeout) * time.Second),
+		Cancelled: false,
+	}
+}
+
+// cancelPendingNotification cancels a pending notification for a service.
+// This is called when the service comes back up before the timeout expires.
+func (m *Monitor) cancelPendingNotification(key string) {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+
+	if pending, exists := m.pendingNotifications[key]; exists {
+		if !pending.Cancelled {
+			log.Printf("Monitor: cancelled pending notification for %s (service recovered)", key)
+			pending.Cancelled = true
+		}
+	}
+}
+
+// processPendingNotifications runs in the background and processes expired pending notifications.
+func (m *Monitor) processPendingNotifications() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.checkPendingNotifications()
+		}
+	}
+}
+
+// checkPendingNotifications checks for expired pending notifications and publishes them.
+func (m *Monitor) checkPendingNotifications() {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+
+	now := time.Now()
+	toDelete := []string{}
+
+	for key, pending := range m.pendingNotifications {
+		// Check if notification was cancelled (service came back up)
+		if pending.Cancelled {
+			toDelete = append(toDelete, key)
+			continue
+		}
+
+		// Check if notification has expired (timeout reached)
+		if now.After(pending.ExpiresAt) {
+			// Double-check current service state before sending notification
+			m.mu.RLock()
+			currentState, exists := m.serviceStates[key]
+			m.mu.RUnlock()
+
+			if exists && currentState.State == "running" {
+				// Service is back up - don't send notification
+				log.Printf("Monitor: pending notification for %s cancelled (service is now running)", key)
+			} else {
+				// Service is still down - send the notification
+				log.Printf("Monitor: sending delayed notification for %s (timeout expired, service still down)", key)
+				m.bus.Publish(pending.Event)
+			}
+			toDelete = append(toDelete, key)
+		}
+	}
+
+	// Clean up processed notifications
+	for _, key := range toDelete {
+		delete(m.pendingNotifications, key)
+	}
+}
+
+// GetPendingNotificationCount returns the number of pending notifications.
+func (m *Monitor) GetPendingNotificationCount() int {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+
+	count := 0
+	for _, pending := range m.pendingNotifications {
+		if !pending.Cancelled {
+			count++
+		}
+	}
+	return count
 }

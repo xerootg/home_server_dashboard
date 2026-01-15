@@ -44,6 +44,7 @@
 | Fix SSH connection leaks in Home Assistant integration - providers were not calling Close() | ✅ Done |
 | Add resource leak analyzer (analysis/closerleak) for go vet-style detection of io.Closer leaks | ✅ Done |
 | Add omada status | |
+| when using wathctower, updates are reported as up/down's - we should integrate watchtower and if a service goes down, see if watchtower did it and not report it unless it doesn't come back up in some reasonable (configurable) timeout | ✅ Done |
 
 ## cut
 | task | reason | reassess when |

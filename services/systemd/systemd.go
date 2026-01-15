@@ -13,22 +13,40 @@ import (
 	"home_server_dashboard/services"
 )
 
+// ServiceEntry represents a systemd service with optional flags.
+type ServiceEntry struct {
+	// Name is the unit name (e.g., "docker.service")
+	Name string
+	// ReadOnly if true, disables start/stop/restart actions for ALL users
+	ReadOnly bool
+}
+
 // Provider implements services.Provider for systemd services.
 type Provider struct {
-	hostName  string
-	address   string
-	unitNames []string
-	isLocal   bool
+	hostName string
+	address  string
+	entries  []ServiceEntry
+	isLocal  bool
 }
 
 // NewProvider creates a new systemd provider for the given host.
+// Deprecated: Use NewProviderWithEntries for read-only support.
 func NewProvider(hostName, address string, unitNames []string) *Provider {
+	entries := make([]ServiceEntry, 0, len(unitNames))
+	for _, name := range unitNames {
+		entries = append(entries, ServiceEntry{Name: name, ReadOnly: false})
+	}
+	return NewProviderWithEntries(hostName, address, entries)
+}
+
+// NewProviderWithEntries creates a new systemd provider with service entries that may include flags.
+func NewProviderWithEntries(hostName, address string, entries []ServiceEntry) *Provider {
 	isLocal := address == "localhost" || address == "127.0.0.1"
 	return &Provider{
-		hostName:  hostName,
-		address:   address,
-		unitNames: unitNames,
-		isLocal:   isLocal,
+		hostName: hostName,
+		address:  address,
+		entries:  entries,
+		isLocal:  isLocal,
 	}
 }
 
@@ -58,15 +76,16 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 		return nil, fmt.Errorf("failed to list units: %w", err)
 	}
 
-	// Create a set of desired unit names for quick lookup
-	desiredUnits := make(map[string]bool)
-	for _, name := range p.unitNames {
-		desiredUnits[name] = true
+	// Create a map of desired unit names to their entries for quick lookup
+	desiredUnits := make(map[string]ServiceEntry)
+	for _, entry := range p.entries {
+		desiredUnits[entry.Name] = entry
 	}
 
 	var result []services.ServiceInfo
 	for _, unit := range units {
-		if !desiredUnits[unit.Name] {
+		entry, found := desiredUnits[unit.Name]
+		if !found {
 			continue
 		}
 
@@ -91,6 +110,7 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 			Source:        "systemd",
 			Host:          p.hostName,
 			Description:   description,
+			ReadOnly:      entry.ReadOnly,
 		})
 
 		// Remove from desired units to track what we found
@@ -98,7 +118,7 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 	}
 
 	// For units not found in running list, check if they exist but are inactive
-	for unitName := range desiredUnits {
+	for unitName, entry := range desiredUnits {
 		info, err := p.getLocalUnitInfo(ctx, conn, unitName)
 		if err != nil {
 			result = append(result, services.ServiceInfo{
@@ -110,9 +130,11 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 				Image:         "-",
 				Source:        "systemd",
 				Host:          p.hostName,
+				ReadOnly:      entry.ReadOnly,
 			})
 			continue
 		}
+		info.ReadOnly = entry.ReadOnly
 		result = append(result, info)
 	}
 
@@ -167,21 +189,23 @@ func (p *Provider) getLocalUnitDescription(ctx context.Context, conn *dbus.Conn,
 func (p *Provider) getRemoteServices(ctx context.Context) ([]services.ServiceInfo, error) {
 	var result []services.ServiceInfo
 
-	for _, unitName := range p.unitNames {
-		info, err := p.getRemoteUnitInfo(ctx, unitName)
+	for _, entry := range p.entries {
+		info, err := p.getRemoteUnitInfo(ctx, entry.Name)
 		if err != nil {
 			result = append(result, services.ServiceInfo{
-				Name:          unitName,
+				Name:          entry.Name,
 				Project:       "systemd",
-				ContainerName: unitName,
+				ContainerName: entry.Name,
 				State:         "stopped",
 				Status:        "unreachable",
 				Image:         "-",
 				Source:        "systemd",
 				Host:          p.hostName,
+				ReadOnly:      entry.ReadOnly,
 			})
 			continue
 		}
+		info.ReadOnly = entry.ReadOnly
 		result = append(result, info)
 	}
 

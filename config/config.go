@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/tailscale/hujson"
@@ -68,6 +69,21 @@ type HomeAssistantConfig struct {
 	SSHAddonPort int `json:"ssh_addon_port,omitempty"`
 }
 
+// WatchtowerConfig holds Watchtower API connection settings for a host.
+// Watchtower is a container update service that automatically updates Docker containers.
+// When configured, the dashboard will suppress false-positive service down notifications
+// during container updates, only alerting if a container doesn't recover within the timeout.
+type WatchtowerConfig struct {
+	// Port is the Watchtower HTTP API port (default 8080).
+	Port int `json:"port"`
+	// Token is the Bearer token for authenticating with the Watchtower API.
+	// Can be set via WATCHTOWER_TOKEN environment variable.
+	Token string `json:"token,omitempty"`
+	// UpdateTimeout is how long to wait (in seconds) for a container to recover after
+	// being stopped during an update before sending a notification. Default is 120 seconds.
+	UpdateTimeout int `json:"update_timeout,omitempty"`
+}
+
 // HostConfig represents a single host's configuration.
 type HostConfig struct {
 	Name               string               `json:"name"`
@@ -77,6 +93,57 @@ type HostConfig struct {
 	DockerComposeRoots []string             `json:"docker_compose_roots"`
 	Traefik            TraefikConfig        `json:"traefik"`
 	HomeAssistant      *HomeAssistantConfig `json:"homeassistant,omitempty"`
+	Watchtower         *WatchtowerConfig    `json:"watchtower,omitempty"`
+}
+
+// SystemdServiceEntry represents a parsed systemd service entry with optional flags.
+type SystemdServiceEntry struct {
+	// Name is the unit name (e.g., "docker.service")
+	Name string
+	// ReadOnly if true, disables start/stop/restart actions for ALL users
+	ReadOnly bool
+}
+
+// GetSystemdServiceEntries parses the SystemdServices list and returns entries with flags.
+// Service names can have suffixes:
+//   - ":ro" - marks the service as read-only (no start/stop/restart for any user)
+//
+// Example: "nas-dashboard.service:ro" returns {Name: "nas-dashboard.service", ReadOnly: true}
+func (h *HostConfig) GetSystemdServiceEntries() []SystemdServiceEntry {
+	entries := make([]SystemdServiceEntry, 0, len(h.SystemdServices))
+	for _, svc := range h.SystemdServices {
+		entry := ParseSystemdServiceEntry(svc)
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// GetSystemdServiceNames returns just the service names without any flags.
+// This is for backwards compatibility with code that just needs the unit names.
+func (h *HostConfig) GetSystemdServiceNames() []string {
+	names := make([]string, 0, len(h.SystemdServices))
+	for _, svc := range h.SystemdServices {
+		entry := ParseSystemdServiceEntry(svc)
+		names = append(names, entry.Name)
+	}
+	return names
+}
+
+// ParseSystemdServiceEntry parses a service entry string into a SystemdServiceEntry.
+// Recognizes the ":ro" suffix for read-only services.
+func ParseSystemdServiceEntry(entry string) SystemdServiceEntry {
+	result := SystemdServiceEntry{}
+	
+	// Check for :ro suffix
+	if strings.HasSuffix(entry, ":ro") {
+		result.Name = strings.TrimSuffix(entry, ":ro")
+		result.ReadOnly = true
+	} else {
+		result.Name = entry
+		result.ReadOnly = false
+	}
+	
+	return result
 }
 
 // HasHomeAssistant returns true if this host has Home Assistant configured.
@@ -99,6 +166,40 @@ func (h *HostConfig) GetSSHAddonPort() int {
 		return 22
 	}
 	return h.HomeAssistant.SSHAddonPort
+}
+
+// HasWatchtower returns true if this host has Watchtower configured.
+func (h *HostConfig) HasWatchtower() bool {
+	return h.Watchtower != nil && h.Watchtower.Port > 0
+}
+
+// GetWatchtowerToken returns the Watchtower API token, checking the environment variable first.
+func (h *HostConfig) GetWatchtowerToken() string {
+	// Check environment variable first
+	if token := os.Getenv("WATCHTOWER_TOKEN"); token != "" {
+		return token
+	}
+	if h.Watchtower != nil {
+		return h.Watchtower.Token
+	}
+	return ""
+}
+
+// GetWatchtowerPort returns the Watchtower API port, or 8080 as default.
+func (h *HostConfig) GetWatchtowerPort() int {
+	if h.Watchtower == nil || h.Watchtower.Port == 0 {
+		return 8080
+	}
+	return h.Watchtower.Port
+}
+
+// GetWatchtowerUpdateTimeout returns the Watchtower update timeout in seconds.
+// Default is 120 seconds if not specified.
+func (h *HostConfig) GetWatchtowerUpdateTimeout() int {
+	if h.Watchtower == nil || h.Watchtower.UpdateTimeout == 0 {
+		return 120
+	}
+	return h.Watchtower.UpdateTimeout
 }
 
 // GetHomeAssistantEndpoint returns the full URL for the Home Assistant API.

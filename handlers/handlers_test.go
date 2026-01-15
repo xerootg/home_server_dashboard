@@ -584,6 +584,67 @@ func TestServiceActionHandler_ValidActions(t *testing.T) {
 	}
 }
 
+// TestServiceActionHandler_ReadOnlyService tests that readonly services reject actions.
+func TestServiceActionHandler_ReadOnlyService(t *testing.T) {
+	configJSON := `{
+		"hosts": [
+			{
+				"name": "testhost",
+				"address": "localhost",
+				"systemd_services": ["docker.service", "nas-dashboard.service:ro"],
+				"docker_compose_roots": []
+			}
+		]
+	}`
+
+	cleanup := setupTestConfig(t, configJSON)
+	defer cleanup()
+
+	t.Run("readonly systemd service rejects actions", func(t *testing.T) {
+		body := strings.NewReader(`{"container_name": "nas-dashboard.service", "service_name": "nas-dashboard.service", "source": "systemd", "host": "testhost"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/services/restart", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		ServiceActionHandler(w, req)
+
+		// Should return forbidden
+		if w.Code != http.StatusForbidden {
+			t.Errorf("Status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+
+		// Check response contains readonly message
+		responseBody := w.Body.String()
+		if !strings.Contains(responseBody, "read-only") {
+			t.Errorf("Expected 'read-only' in body, got: %s", responseBody)
+		}
+	})
+
+	t.Run("non-readonly systemd service allows actions", func(t *testing.T) {
+		body := strings.NewReader(`{"container_name": "docker.service", "service_name": "docker.service", "source": "systemd", "host": "testhost"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/services/restart", body)
+		req.Header.Set("Content-Type", "application/json")
+
+		// Use a context that will be cancelled immediately to prevent actual service actions
+		ctx, cancel := context.WithCancel(req.Context())
+		cancel() // Cancel immediately to prevent real actions
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+
+		ServiceActionHandler(w, req)
+
+		// Should NOT return forbidden - should set SSE headers instead
+		if w.Code == http.StatusForbidden {
+			t.Error("Non-readonly service should not be forbidden")
+		}
+
+		if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+			t.Errorf("Content-Type = %v, want text/event-stream", ct)
+		}
+	})
+}
+
 // TestFindComposeFile tests the compose file detection function.
 func TestFindComposeFile(t *testing.T) {
 	tempDir := t.TempDir()

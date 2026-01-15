@@ -1104,3 +1104,267 @@ func TestLoad_HomeAssistantConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestParseSystemdServiceEntry(t *testing.T) {
+	tests := []struct {
+		name         string
+		entry        string
+		wantName     string
+		wantReadOnly bool
+	}{
+		{"plain service name", "docker.service", "docker.service", false},
+		{"readonly service", "nas-dashboard.service:ro", "nas-dashboard.service", true},
+		{"uppercase RO ignored", "test.service:RO", "test.service:RO", false},
+		{"empty string", "", "", false},
+		{"only :ro suffix", ":ro", "", true},
+		{"multiple colons", "some:thing:ro", "some:thing", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseSystemdServiceEntry(tt.entry)
+			if result.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", result.Name, tt.wantName)
+			}
+			if result.ReadOnly != tt.wantReadOnly {
+				t.Errorf("ReadOnly = %v, want %v", result.ReadOnly, tt.wantReadOnly)
+			}
+		})
+	}
+}
+
+func TestHostConfig_GetSystemdServiceEntries(t *testing.T) {
+	host := HostConfig{
+		Name:    "testhost",
+		Address: "localhost",
+		SystemdServices: []string{
+			"docker.service",
+			"nas-dashboard.service:ro",
+			"nginx.service",
+		},
+	}
+
+	entries := host.GetSystemdServiceEntries()
+
+	if len(entries) != 3 {
+		t.Fatalf("Expected 3 entries, got %d", len(entries))
+	}
+
+	// Check first entry (not readonly)
+	if entries[0].Name != "docker.service" {
+		t.Errorf("entries[0].Name = %q, want %q", entries[0].Name, "docker.service")
+	}
+	if entries[0].ReadOnly {
+		t.Error("entries[0].ReadOnly = true, want false")
+	}
+
+	// Check second entry (readonly)
+	if entries[1].Name != "nas-dashboard.service" {
+		t.Errorf("entries[1].Name = %q, want %q", entries[1].Name, "nas-dashboard.service")
+	}
+	if !entries[1].ReadOnly {
+		t.Error("entries[1].ReadOnly = false, want true")
+	}
+
+	// Check third entry (not readonly)
+	if entries[2].Name != "nginx.service" {
+		t.Errorf("entries[2].Name = %q, want %q", entries[2].Name, "nginx.service")
+	}
+	if entries[2].ReadOnly {
+		t.Error("entries[2].ReadOnly = true, want false")
+	}
+}
+
+func TestHostConfig_GetSystemdServiceNames(t *testing.T) {
+	host := HostConfig{
+		Name:    "testhost",
+		Address: "localhost",
+		SystemdServices: []string{
+			"docker.service",
+			"nas-dashboard.service:ro",
+			"nginx.service:ro",
+		},
+	}
+
+	names := host.GetSystemdServiceNames()
+
+	if len(names) != 3 {
+		t.Fatalf("Expected 3 names, got %d", len(names))
+	}
+
+	expected := []string{"docker.service", "nas-dashboard.service", "nginx.service"}
+	for i, name := range names {
+		if name != expected[i] {
+			t.Errorf("names[%d] = %q, want %q", i, name, expected[i])
+		}
+	}
+}
+
+func TestWatchtowerConfig_HasWatchtower(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected bool
+	}{
+		{
+			name:     "nil watchtower config",
+			host:     HostConfig{Name: "test"},
+			expected: false,
+		},
+		{
+			name: "zero port",
+			host: HostConfig{
+				Name:       "test",
+				Watchtower: &WatchtowerConfig{Port: 0},
+			},
+			expected: false,
+		},
+		{
+			name: "valid config",
+			host: HostConfig{
+				Name: "test",
+				Watchtower: &WatchtowerConfig{
+					Port:  8080,
+					Token: "test-token",
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.host.HasWatchtower()
+			if result != tt.expected {
+				t.Errorf("HasWatchtower() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWatchtowerConfig_GetWatchtowerPort(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected int
+	}{
+		{
+			name:     "nil config returns default",
+			host:     HostConfig{Name: "test"},
+			expected: 8080,
+		},
+		{
+			name: "zero port returns default",
+			host: HostConfig{
+				Name:       "test",
+				Watchtower: &WatchtowerConfig{Port: 0},
+			},
+			expected: 8080,
+		},
+		{
+			name: "custom port",
+			host: HostConfig{
+				Name:       "test",
+				Watchtower: &WatchtowerConfig{Port: 8023},
+			},
+			expected: 8023,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.host.GetWatchtowerPort()
+			if result != tt.expected {
+				t.Errorf("GetWatchtowerPort() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWatchtowerConfig_GetWatchtowerUpdateTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected int
+	}{
+		{
+			name:     "nil config returns default",
+			host:     HostConfig{Name: "test"},
+			expected: 120,
+		},
+		{
+			name: "zero timeout returns default",
+			host: HostConfig{
+				Name:       "test",
+				Watchtower: &WatchtowerConfig{UpdateTimeout: 0},
+			},
+			expected: 120,
+		},
+		{
+			name: "custom timeout",
+			host: HostConfig{
+				Name:       "test",
+				Watchtower: &WatchtowerConfig{UpdateTimeout: 300},
+			},
+			expected: 300,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.host.GetWatchtowerUpdateTimeout()
+			if result != tt.expected {
+				t.Errorf("GetWatchtowerUpdateTimeout() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWatchtowerConfig_GetWatchtowerToken(t *testing.T) {
+	// Test with env var
+	t.Run("env var takes precedence", func(t *testing.T) {
+		t.Setenv("WATCHTOWER_TOKEN", "env-token")
+		
+		host := HostConfig{
+			Name: "test",
+			Watchtower: &WatchtowerConfig{
+				Port:  8080,
+				Token: "config-token",
+			},
+		}
+		
+		result := host.GetWatchtowerToken()
+		if result != "env-token" {
+			t.Errorf("GetWatchtowerToken() = %v, want env-token", result)
+		}
+	})
+
+	// Test without env var (need separate test because t.Setenv persists)
+	t.Run("falls back to config token", func(t *testing.T) {
+		// Clear env var
+		os.Unsetenv("WATCHTOWER_TOKEN")
+		
+		host := HostConfig{
+			Name: "test",
+			Watchtower: &WatchtowerConfig{
+				Port:  8080,
+				Token: "config-token",
+			},
+		}
+		
+		result := host.GetWatchtowerToken()
+		if result != "config-token" {
+			t.Errorf("GetWatchtowerToken() = %v, want config-token", result)
+		}
+	})
+
+	t.Run("nil config returns empty", func(t *testing.T) {
+		os.Unsetenv("WATCHTOWER_TOKEN")
+		
+		host := HostConfig{Name: "test"}
+		result := host.GetWatchtowerToken()
+		if result != "" {
+			t.Errorf("GetWatchtowerToken() = %v, want empty string", result)
+		}
+	})
+}

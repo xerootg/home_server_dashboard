@@ -66,9 +66,12 @@ home_server_dashboard/
 │   │   ├── service_test.go        # Unit tests for Traefik service provider
 │   │   ├── matcher.go             # MatcherLookupService for hostname extraction with state tracking
 │   │   └── matcher_test.go        # Unit tests for matcher lookup service
-│   └── homeassistant/
-│       ├── homeassistant.go       # Home Assistant provider and service implementation
-│       └── homeassistant_test.go  # Unit tests for Home Assistant provider
+│   ├── homeassistant/
+│   │   ├── homeassistant.go       # Home Assistant provider and service implementation
+│   │   └── homeassistant_test.go  # Unit tests for Home Assistant provider
+│   └── watchtower/
+│       ├── watchtower.go          # Watchtower API client for update status monitoring
+│       └── watchtower_test.go     # Unit tests for Watchtower client
 ├── frontend/                      # Frontend source and tests (JSX/ES6 modules)
 │   ├── jsx.js                     # Minimal JSX runtime (h, Fragment, raw)
 │   ├── main.jsx                   # Entry point, DOMContentLoaded, window.__dashboard global
@@ -439,8 +442,13 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
       "name": "nas",                    // Display name
       "address": "localhost",           // "localhost" uses D-Bus, others use SSH
       "nic": ["ens10"],                 // NIC names to resolve private IP for port links
-      "systemd_services": ["docker.service"],
+      "systemd_services": ["docker.service", "nas-dashboard.service:ro"],  // :ro = read-only (no start/stop/restart)
       "docker_compose_roots": ["/home/xero/nas/"],
+      "watchtower": {                   // Optional: Watchtower integration
+        "port": 8080,                   // Watchtower HTTP API port (default 8080)
+        "token": "your-token",          // API token (or use WATCHTOWER_TOKEN env var)
+        "update_timeout": 120           // Seconds to wait for container recovery (default 120)
+      },
       "traefik": {
         "enabled": true,                // Enable Traefik hostname lookup
         "api_port": 8080                // Traefik API port (default 8080)
@@ -516,6 +524,67 @@ The dashboard can send push notifications to a Gotify server when service states
 | Host recovered | High (8) | ✅ Previously unreachable host is now reachable |
 
 **Startup behavior:** The monitor skips event emission during initial service discovery to avoid notification spam on dashboard startup/restart.
+
+### Watchtower Integration
+
+When [Watchtower](https://containrrr.dev/watchtower/) is configured, the dashboard will suppress false-positive "service stopped" notifications during container updates. Instead of immediately sending a notification when a Docker container stops, the dashboard will wait for a configurable timeout. If the container comes back up within that time (as expected during an update), no notification is sent.
+
+**Configuration:**
+```json
+"watchtower": {
+  "port": 8080,               // Watchtower metrics API port (default 8080)
+  "token": "your-token",      // Metrics API token (or use WATCHTOWER_TOKEN env var)
+  "update_timeout": 120       // Seconds to wait for recovery (default 120)
+}
+```
+
+**Requirements:**
+- Watchtower must have `--http-api-metrics` enabled (for metrics endpoint)
+- Watchtower must have `--http-api-token` set (for authentication)
+- The dashboard needs network access to Watchtower's metrics endpoint
+
+**Environment Variable:** The `WATCHTOWER_TOKEN` environment variable takes precedence over the config file token.
+
+**How it works:**
+1. When a Docker container stops on a host with Watchtower configured, the notification is queued (not sent immediately)
+2. The dashboard queries Watchtower's `/v1/metrics` endpoint to check if containers are being scanned or were recently updated
+3. If an update is detected as in-progress or recent (within 30 seconds), the container stop is assumed to be update-related
+4. The dashboard waits for the container to restart within `update_timeout` seconds
+5. If the container restarts within the timeout, the notification is cancelled
+6. If the timeout expires and the container is still down, the notification is sent
+
+**Example Watchtower setup:**
+```yaml
+services:
+  watchtower:
+    image: containrrr/watchtower
+    environment:
+      - WATCHTOWER_HTTP_API_TOKEN=your-secret-token
+      - WATCHTOWER_HTTP_API_METRICS=true
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+**Note:** The dashboard only uses Watchtower's metrics endpoint (`/v1/metrics`) for monitoring. It does not trigger updates via the API - Watchtower continues to run on its normal schedule. This is a read-only integration.
+
+### Read-Only Services
+
+Systemd services can be marked as read-only by appending `:ro` to the service name in the configuration. Read-only services:
+- Display a lock icon instead of start/stop/restart buttons in the UI
+- Reject all control actions (start, stop, restart) from **ALL users**, including admins
+- Are useful for monitoring services that should not be controlled via the dashboard (e.g., the dashboard itself, critical infrastructure)
+
+**Configuration:**
+```json
+"systemd_services": [
+  "docker.service",           // Normal service (can be controlled)
+  "nas-dashboard.service:ro"  // Read-only service (monitoring only)
+]
+```
+
+**Use case:** When monitoring the dashboard's own systemd service, stopping or restarting it through the dashboard would be problematic. Marking it as `:ro` prevents accidental self-termination.
 
 ### OIDC Group-Based Access Control
 
@@ -620,6 +689,7 @@ type ServiceInfo struct {
     TraefikServiceName string `json:"traefik_service_name,omitempty"` // Traefik service name from labels (if different from Name)
     Description   string     `json:"description"`             // Service description (from Docker label or systemd unit)
     Hidden        bool       `json:"hidden,omitempty"`        // If true, service should be hidden from UI
+    ReadOnly      bool       `json:"readonly,omitempty"`      // If true, start/stop/restart disabled for all users
     LogSize       int64      `json:"log_size,omitempty"`      // Size of log file in bytes (Docker only)
 }
 ```

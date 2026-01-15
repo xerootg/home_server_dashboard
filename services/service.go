@@ -33,6 +33,7 @@ type ServiceInfo struct {
 	TraefikServiceName string     `json:"traefik_service_name,omitempty"` // Traefik service name from labels (if different from Name)
 	Description        string     `json:"description"`                    // Service description (from Docker label or systemd unit)
 	Hidden             bool       `json:"hidden,omitempty"`               // If true, service should be hidden from UI
+	ReadOnly           bool       `json:"readonly,omitempty"`             // If true, start/stop/restart actions are disabled for ALL users
 	LogSize            int64      `json:"log_size,omitempty"`             // Size of log file in bytes (Docker only)
 }
 

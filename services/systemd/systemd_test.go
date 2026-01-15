@@ -58,8 +58,8 @@ func TestNewProvider(t *testing.T) {
 			if p.address != tt.address {
 				t.Errorf("address = %v, want %v", p.address, tt.address)
 			}
-			if len(p.unitNames) != len(tt.unitNames) {
-				t.Errorf("unitNames length = %v, want %v", len(p.unitNames), len(tt.unitNames))
+			if len(p.entries) != len(tt.unitNames) {
+				t.Errorf("entries length = %v, want %v", len(p.entries), len(tt.unitNames))
 			}
 			if p.isLocal != tt.wantIsLocal {
 				t.Errorf("isLocal = %v, want %v", p.isLocal, tt.wantIsLocal)
@@ -317,8 +317,8 @@ LoadState=loaded`,
 func TestProviderWithNoUnits(t *testing.T) {
 	p := NewProvider("testhost", "192.168.1.100", []string{})
 
-	if len(p.unitNames) != 0 {
-		t.Errorf("unitNames should be empty, got %v", p.unitNames)
+	if len(p.entries) != 0 {
+		t.Errorf("entries should be empty, got %v", p.entries)
 	}
 
 	// GetServices should return empty list for remote host with no units
@@ -394,5 +394,86 @@ func BenchmarkProviderCreation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		NewProvider("benchmark-host", "192.168.1.100", units)
+	}
+}
+
+// TestNewProviderWithEntries_ReadOnly tests that read-only entries are preserved.
+func TestNewProviderWithEntries_ReadOnly(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "docker.service", ReadOnly: false},
+		{Name: "nas-dashboard.service", ReadOnly: true},
+		{Name: "nginx.service", ReadOnly: false},
+	}
+
+	p := NewProviderWithEntries("testhost", "localhost", entries)
+
+	if len(p.entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(p.entries))
+	}
+
+	// Verify read-only flags are preserved
+	for _, entry := range p.entries {
+		switch entry.Name {
+		case "docker.service":
+			if entry.ReadOnly {
+				t.Error("docker.service should not be read-only")
+			}
+		case "nas-dashboard.service":
+			if !entry.ReadOnly {
+				t.Error("nas-dashboard.service should be read-only")
+			}
+		case "nginx.service":
+			if entry.ReadOnly {
+				t.Error("nginx.service should not be read-only")
+			}
+		}
+	}
+}
+
+// TestNewProvider_AlwaysNonReadOnly tests that NewProvider creates non-read-only entries.
+func TestNewProvider_AlwaysNonReadOnly(t *testing.T) {
+	// Even if the unit name contains ":ro", NewProvider should not parse it
+	// (that's the config package's job)
+	p := NewProvider("testhost", "localhost", []string{"docker.service", "test.service"})
+
+	for _, entry := range p.entries {
+		if entry.ReadOnly {
+			t.Errorf("entry %s should not be read-only when using NewProvider", entry.Name)
+		}
+	}
+}
+
+// TestGetService_ReadOnlyFlagPreserved tests that read-only flag is passed to the provider.
+func TestGetService_ReadOnlyFlagPreserved(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "readonly.service", ReadOnly: true},
+		{Name: "normal.service", ReadOnly: false},
+	}
+
+	p := NewProviderWithEntries("testhost", "192.168.1.100", entries)
+
+	// Verify the entries are stored correctly in the provider
+	foundReadonly := false
+	foundNormal := false
+	for _, entry := range p.entries {
+		if entry.Name == "readonly.service" {
+			foundReadonly = true
+			if !entry.ReadOnly {
+				t.Error("readonly.service should have ReadOnly=true in provider entries")
+			}
+		}
+		if entry.Name == "normal.service" {
+			foundNormal = true
+			if entry.ReadOnly {
+				t.Error("normal.service should have ReadOnly=false in provider entries")
+			}
+		}
+	}
+
+	if !foundReadonly {
+		t.Error("readonly.service not found in provider entries")
+	}
+	if !foundNormal {
+		t.Error("normal.service not found in provider entries")
 	}
 }

@@ -9,11 +9,18 @@
         "ens10"
       ],
       "systemd_services": [
-        "docker.service"
+        "docker.service",
+        "nas-dashboard.service:ro"  // :ro suffix makes service read-only (no start/stop/restart)
       ],
       "docker_compose_roots": [
         "/some/folder/"
       ],
+      // Watchtower integration: suppress false-positive notifications during container updates
+      "watchtower": {
+        "port": 8080,                    // Watchtower HTTP API port (default 8080)
+        "token": "your-token",
+        "update_timeout": 120            // Seconds to wait for container to recover (default 120)
+      },
       "traefik": {
         "enabled": true,
         "api_port": 8080

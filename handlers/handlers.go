@@ -75,7 +75,17 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 			continue
 		}
 
-		systemdProvider := systemd.NewProvider(host.Name, host.Address, host.SystemdServices)
+		// Convert config entries to systemd entries
+		configEntries := host.GetSystemdServiceEntries()
+		systemdEntries := make([]systemd.ServiceEntry, 0, len(configEntries))
+		for _, entry := range configEntries {
+			systemdEntries = append(systemdEntries, systemd.ServiceEntry{
+				Name:     entry.Name,
+				ReadOnly: entry.ReadOnly,
+			})
+		}
+
+		systemdProvider := systemd.NewProviderWithEntries(host.Name, host.Address, systemdEntries)
 		systemdServices, err := systemdProvider.GetServices(ctx)
 		if err != nil {
 			log.Printf("Warning: failed to get systemd services from %s: %v", host.Name, err)
@@ -782,6 +792,30 @@ type ServiceActionRequest struct {
 	Project       string `json:"project"`
 }
 
+// isServiceReadOnly checks if a service is configured as read-only.
+// For systemd services, this is controlled by the :ro suffix in config.
+func isServiceReadOnly(cfg *config.Config, host, serviceName, source string) bool {
+	if cfg == nil {
+		return false
+	}
+
+	// Currently only systemd services support read-only mode via config
+	if source == "systemd" {
+		hostCfg := cfg.GetHostByName(host)
+		if hostCfg == nil {
+			return false
+		}
+		entries := hostCfg.GetSystemdServiceEntries()
+		for _, entry := range entries {
+			if entry.Name == serviceName {
+				return entry.ReadOnly
+			}
+		}
+	}
+
+	return false
+}
+
 // ServiceActionHandler handles POST /api/services/action requests for start/stop/restart.
 // It streams status updates via SSE.
 func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -812,6 +846,13 @@ func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if service is read-only (blocks ALL users, including admins)
+	cfg := config.Get()
+	if isServiceReadOnly(cfg, req.Host, req.ServiceName, req.Source) {
+		http.Error(w, "This service is read-only: start/stop/restart actions are disabled", http.StatusForbidden)
+		return
+	}
+
 	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -834,7 +875,6 @@ func ServiceActionHandler(w http.ResponseWriter, r *http.Request) {
 
 	sendEvent("status", fmt.Sprintf("Starting %s action on %s...", action, req.ServiceName))
 
-	cfg := config.Get()
 	var err error
 
 	if req.Source == "docker" {

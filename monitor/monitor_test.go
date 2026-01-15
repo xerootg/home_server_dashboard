@@ -8,6 +8,7 @@ import (
 
 	"home_server_dashboard/config"
 	"home_server_dashboard/events"
+	"home_server_dashboard/services"
 )
 
 func TestNew(t *testing.T) {
@@ -311,4 +312,258 @@ func TestMultipleStopsAreSafe(t *testing.T) {
 	m.Stop()
 	m.Stop()
 	m.Stop()
+}
+
+func TestShouldDelayNotification(t *testing.T) {
+	cfg := &config.Config{
+		Hosts: []config.HostConfig{
+			{
+				Name:    "nas",
+				Address: "localhost",
+				Watchtower: &config.WatchtowerConfig{
+					Port:  8023,
+					Token: "test-token",
+				},
+			},
+			{
+				Name:    "remote",
+				Address: "192.168.1.10",
+				// No Watchtower configured
+			},
+		},
+	}
+	bus := events.NewBus(false)
+
+	// Set token so client gets created
+	t.Setenv("WATCHTOWER_TOKEN", "test-token")
+
+	m := New(cfg, bus)
+
+	tests := []struct {
+		name     string
+		svc      services.ServiceInfo
+		oldState string
+		newState string
+		expected bool
+	}{
+		{
+			name:     "Docker stopped on host with Watchtower",
+			svc:      services.ServiceInfo{Name: "traefik", Host: "nas", Source: "docker"},
+			oldState: "running",
+			newState: "stopped",
+			expected: true,
+		},
+		{
+			name:     "Docker started (not stopped)",
+			svc:      services.ServiceInfo{Name: "traefik", Host: "nas", Source: "docker"},
+			oldState: "stopped",
+			newState: "running",
+			expected: false,
+		},
+		{
+			name:     "Systemd service stopped",
+			svc:      services.ServiceInfo{Name: "docker.service", Host: "nas", Source: "systemd"},
+			oldState: "running",
+			newState: "stopped",
+			expected: false, // Only Docker services are delayed
+		},
+		{
+			name:     "Docker stopped on host without Watchtower",
+			svc:      services.ServiceInfo{Name: "nginx", Host: "remote", Source: "docker"},
+			oldState: "running",
+			newState: "stopped",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.shouldDelayNotification(tt.svc, tt.oldState, tt.newState)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestPendingNotificationQueue(t *testing.T) {
+	cfg := &config.Config{
+		Hosts: []config.HostConfig{
+			{
+				Name:    "nas",
+				Address: "localhost",
+				Watchtower: &config.WatchtowerConfig{
+					Port:          8023,
+					Token:         "test-token",
+					UpdateTimeout: 5, // 5 seconds for test
+				},
+			},
+		},
+	}
+	bus := events.NewBus(false)
+	t.Setenv("WATCHTOWER_TOKEN", "test-token")
+
+	m := New(cfg, bus)
+
+	// Queue a pending notification
+	event := events.NewServiceStateChangedEvent("nas", "traefik", "docker", "running", "stopped", "Exited (0)")
+	m.queuePendingNotification("nas:traefik", event)
+
+	// Check it's pending
+	if m.GetPendingNotificationCount() != 1 {
+		t.Errorf("expected 1 pending notification, got %d", m.GetPendingNotificationCount())
+	}
+
+	// Cancel the notification
+	m.cancelPendingNotification("nas:traefik")
+
+	// Check it's cancelled (count should be 0)
+	if m.GetPendingNotificationCount() != 0 {
+		t.Errorf("expected 0 pending notifications after cancel, got %d", m.GetPendingNotificationCount())
+	}
+}
+
+func TestPendingNotificationExpiry(t *testing.T) {
+	cfg := &config.Config{
+		Hosts: []config.HostConfig{
+			{
+				Name:    "nas",
+				Address: "localhost",
+				Watchtower: &config.WatchtowerConfig{
+					Port:          8023,
+					Token:         "test-token",
+					UpdateTimeout: 1, // 1 second for quick test
+				},
+			},
+		},
+	}
+	bus := events.NewBus(false)
+	t.Setenv("WATCHTOWER_TOKEN", "test-token")
+
+	var receivedEvents []events.Event
+	var mu sync.Mutex
+
+	bus.Subscribe(events.ServiceStateChanged, func(event events.Event) {
+		mu.Lock()
+		receivedEvents = append(receivedEvents, event)
+		mu.Unlock()
+	})
+
+	m := New(cfg, bus)
+
+	// Set service state as stopped so the notification will be sent
+	m.mu.Lock()
+	m.serviceStates["nas:traefik"] = ServiceState{State: "stopped", Status: "Exited (0)"}
+	m.mu.Unlock()
+
+	// Queue a pending notification with 1 second timeout
+	event := events.NewServiceStateChangedEvent("nas", "traefik", "docker", "running", "stopped", "Exited (0)")
+	m.queuePendingNotification("nas:traefik", event)
+
+	// Wait for notification to expire
+	time.Sleep(1500 * time.Millisecond)
+
+	// Check pending notifications
+	m.checkPendingNotifications()
+
+	// Event should have been sent since service is still down
+	mu.Lock()
+	count := len(receivedEvents)
+	mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("expected 1 event after timeout, got %d", count)
+	}
+
+	// Pending notification should be cleaned up
+	if m.GetPendingNotificationCount() != 0 {
+		t.Errorf("expected 0 pending after expiry, got %d", m.GetPendingNotificationCount())
+	}
+}
+
+func TestPendingNotificationRecovery(t *testing.T) {
+	cfg := &config.Config{
+		Hosts: []config.HostConfig{
+			{
+				Name:    "nas",
+				Address: "localhost",
+				Watchtower: &config.WatchtowerConfig{
+					Port:          8023,
+					Token:         "test-token",
+					UpdateTimeout: 5,
+				},
+			},
+		},
+	}
+	bus := events.NewBus(false)
+	t.Setenv("WATCHTOWER_TOKEN", "test-token")
+
+	var receivedEvents []events.Event
+	var mu sync.Mutex
+
+	bus.Subscribe(events.ServiceStateChanged, func(event events.Event) {
+		mu.Lock()
+		receivedEvents = append(receivedEvents, event)
+		mu.Unlock()
+	})
+
+	m := New(cfg, bus)
+
+	// Queue a pending notification
+	event := events.NewServiceStateChangedEvent("nas", "traefik", "docker", "running", "stopped", "Exited (0)")
+	m.queuePendingNotification("nas:traefik", event)
+
+	// Simulate service coming back up
+	m.mu.Lock()
+	m.serviceStates["nas:traefik"] = ServiceState{State: "running", Status: "Up"}
+	m.mu.Unlock()
+
+	// Expire the notification
+	m.pendingMu.Lock()
+	if pending, exists := m.pendingNotifications["nas:traefik"]; exists {
+		pending.ExpiresAt = time.Now().Add(-1 * time.Second)
+	}
+	m.pendingMu.Unlock()
+
+	// Check notifications - should NOT send because service is up
+	m.checkPendingNotifications()
+
+	mu.Lock()
+	count := len(receivedEvents)
+	mu.Unlock()
+
+	if count != 0 {
+		t.Errorf("expected 0 events (service recovered), got %d", count)
+	}
+}
+
+func TestWatchtowerClientInitialization(t *testing.T) {
+	cfg := &config.Config{
+		Hosts: []config.HostConfig{
+			{
+				Name:    "nas",
+				Address: "localhost",
+				Watchtower: &config.WatchtowerConfig{
+					Port:  8023,
+					Token: "direct-token",
+				},
+			},
+			{
+				Name:    "remote",
+				Address: "192.168.1.10",
+				// No Watchtower
+			},
+		},
+	}
+	bus := events.NewBus(false)
+	m := New(cfg, bus)
+
+	// Should have 1 Watchtower client
+	if len(m.watchtowerClients) != 1 {
+		t.Errorf("expected 1 watchtower client, got %d", len(m.watchtowerClients))
+	}
+
+	if _, exists := m.watchtowerClients["nas"]; !exists {
+		t.Error("expected watchtower client for 'nas'")
+	}
 }

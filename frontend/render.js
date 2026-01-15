@@ -144,6 +144,11 @@ export function isAdmin() {
  * @returns {string} HTML string of control buttons
  */
 export function renderControlButtons(service) {
+    // Read-only services show no control buttons
+    if (service.readonly) {
+        return '<div class="service-controls"><span class="text-muted small" title="This service is read-only"><i class="bi bi-lock"></i></span></div>';
+    }
+    
     const isRunning = service.state.toLowerCase() === 'running';
     const containerName = escapeHtml(service.container_name);
     const serviceName = escapeHtml(service.name);

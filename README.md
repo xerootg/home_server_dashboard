@@ -316,10 +316,103 @@ services:
       home.server.dashboard.ports.8080.label: "Admin Panel"
       home.server.dashboard.ports.9000.hidden: "true"
 ```
+### Watchtower Integration
 
-### Systemd Descriptions
+The dashboard integrates with [Watchtower](https://containrrr.dev/watchtower/) to suppress false-positive "service stopped" notifications during container updates. When Watchtower updates a container, it briefly stops the old container before starting the new one. Without integration, this would trigger unwanted "service down" alerts.
+
+```json
+{
+  "hosts": [
+    {
+      "name": "myserver",
+      "address": "localhost",
+      "watchtower": {
+        "port": 8080,
+        "token": "your-watchtower-api-token",
+        "update_timeout": 120
+      }
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `port` | Watchtower metrics API port (default: 8080) |
+| `token` | Metrics API token for authentication (can use `WATCHTOWER_TOKEN` env var) |
+| `update_timeout` | Seconds to wait for container recovery before sending notification (default: 120) |
+
+**How it works:**
+
+1. When a Docker container stops on a host with Watchtower configured, the notification is **queued** instead of being sent immediately
+2. The dashboard queries Watchtower's `/v1/metrics` endpoint to check if containers are being scanned or were recently updated
+3. If an update is detected as in-progress or recent (within 30 seconds), the container stop is assumed to be update-related
+4. The dashboard waits for the container to restart within `update_timeout` seconds
+5. **If the container restarts within the timeout**, the notification is cancelled (no alert sent)
+6. **If the timeout expires and the container is still down**, the notification is sent normally
+
+**Requirements:**
+
+- Watchtower must have `--http-api-metrics` enabled (for metrics endpoint)
+- Watchtower must have `--http-api-token` set (for authentication)
+- The dashboard needs network access to Watchtower's metrics endpoint
+
+**Example Watchtower configuration:**
+
+```yaml
+services:
+  watchtower:
+    image: containrrr/watchtower
+    environment:
+      - WATCHTOWER_HTTP_API_TOKEN=your-secret-token
+      - WATCHTOWER_HTTP_API_METRICS=true
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+**Environment Variable:** The `WATCHTOWER_TOKEN` environment variable takes precedence over the token in `services.json`, allowing you to keep secrets out of configuration files.
+
+**Benefits:**
+- Eliminates false-positive alerts during routine container updates
+- Reduces notification noise while maintaining alert coverage for actual failures
+- Configurable timeout allows adjustment based on typical update duration
+- Read-only integration - the dashboard only monitors updates, it does not trigger them
+### Systemd Services
+
+#### Service Descriptions
 
 Descriptions for systemd units are automatically fetched from the unit's `Description` field.
+
+#### Read-Only Services
+
+Systemd services can be marked as read-only to prevent start/stop/restart actions from all users (including admins). This is useful for critical services that should only be monitored, not controlled.
+
+To mark a service as read-only, append `:ro` to the service name in your configuration:
+
+```json
+{
+  "hosts": [
+    {
+      "name": "myserver",
+      "address": "localhost",
+      "systemd_services": [
+        "docker.service",
+        "nas-dashboard.service:ro"
+      ]
+    }
+  ]
+}
+```
+
+**Behavior:**
+- Read-only services display a lock icon (🔒) instead of start/stop/restart buttons in the UI
+- All control actions (start, stop, restart) are rejected with a 403 Forbidden response
+- Applies to **all users**, including administrators
+- Useful for monitoring the dashboard's own systemd service to prevent accidental self-termination
+
+**Example use case:** Marking `nas-dashboard.service:ro` prevents users from stopping or restarting the dashboard through the web interface, which would cause the dashboard to become unavailable.
 
 ## Web Interface
 
