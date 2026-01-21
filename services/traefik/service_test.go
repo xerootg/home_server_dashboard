@@ -105,7 +105,7 @@ func TestTraefikServiceGetLogs(t *testing.T) {
 }
 
 func TestTraefikProviderName(t *testing.T) {
-	provider := NewProvider("nas", "localhost", 8080)
+	provider := NewProvider("nas", "localhost", 8080, nil)
 	defer provider.Close()
 
 	if provider.Name() != "traefik" {
@@ -114,7 +114,7 @@ func TestTraefikProviderName(t *testing.T) {
 }
 
 func TestTraefikProviderGetLogs(t *testing.T) {
-	provider := NewProvider("nas", "localhost", 8080)
+	provider := NewProvider("nas", "localhost", 8080, nil)
 	defer provider.Close()
 
 	reader, err := provider.GetLogs(context.Background(), "test-service", 100, true)
@@ -134,7 +134,7 @@ func TestTraefikProviderGetLogs(t *testing.T) {
 }
 
 func TestTraefikProviderGetService(t *testing.T) {
-	provider := NewProvider("nas", "localhost", 8080)
+	provider := NewProvider("nas", "localhost", 8080, nil)
 	defer provider.Close()
 
 	svc, err := provider.GetService("test-service")

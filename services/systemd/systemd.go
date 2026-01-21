@@ -22,14 +22,43 @@ type ServiceEntry struct {
 	User string
 	// ReadOnly if true, disables start/stop/restart actions for ALL users
 	ReadOnly bool
+	// Ports are the port numbers advertised for this service in the UI
+	Ports []uint16
+}
+
+// SSHConfig holds SSH connection settings for remote hosts.
+type SSHConfig struct {
+	// Username is the SSH username to use when connecting.
+	// If empty, the default SSH user (usually current user) is used.
+	Username string
+	// Port is the SSH port to use when connecting.
+	// If 0, the default SSH port (22) is used.
+	Port int
 }
 
 // Provider implements services.Provider for systemd services.
 type Provider struct {
-	hostName string
-	address  string
-	entries  []ServiceEntry
-	isLocal  bool
+	hostName  string
+	address   string
+	entries   []ServiceEntry
+	isLocal   bool
+	sshConfig *SSHConfig
+}
+
+// portsToPortInfo converts a slice of port numbers to PortInfo structs.
+func portsToPortInfo(ports []uint16) []services.PortInfo {
+	if len(ports) == 0 {
+		return nil
+	}
+	result := make([]services.PortInfo, len(ports))
+	for i, port := range ports {
+		result[i] = services.PortInfo{
+			HostPort:      port,
+			ContainerPort: port,
+			Protocol:      "tcp",
+		}
+	}
+	return result
 }
 
 // NewProvider creates a new systemd provider for the given host.
@@ -39,18 +68,37 @@ func NewProvider(hostName, address string, unitNames []string) *Provider {
 	for _, name := range unitNames {
 		entries = append(entries, ServiceEntry{Name: name, ReadOnly: false})
 	}
-	return NewProviderWithEntries(hostName, address, entries)
+	return NewProviderWithEntries(hostName, address, entries, nil)
 }
 
 // NewProviderWithEntries creates a new systemd provider with service entries that may include flags.
-func NewProviderWithEntries(hostName, address string, entries []ServiceEntry) *Provider {
+// sshConfig is optional and only used for remote hosts.
+func NewProviderWithEntries(hostName, address string, entries []ServiceEntry, sshConfig *SSHConfig) *Provider {
 	isLocal := address == "localhost" || address == "127.0.0.1"
 	return &Provider{
-		hostName: hostName,
-		address:  address,
-		entries:  entries,
-		isLocal:  isLocal,
+		hostName:  hostName,
+		address:   address,
+		entries:   entries,
+		isLocal:   isLocal,
+		sshConfig: sshConfig,
 	}
+}
+
+// getSSHTarget returns the SSH target string (user@host or just host).
+func (p *Provider) getSSHTarget() string {
+	if p.sshConfig != nil && p.sshConfig.Username != "" {
+		return p.sshConfig.Username + "@" + p.address
+	}
+	return p.address
+}
+
+// getSSHBaseArgs returns the common SSH arguments including port if configured.
+func (p *Provider) getSSHBaseArgs() []string {
+	args := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new"}
+	if p.sshConfig != nil && p.sshConfig.Port > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", p.sshConfig.Port))
+	}
+	return args
 }
 
 // Name returns the provider name.
@@ -160,6 +208,7 @@ func (p *Provider) getLocalSystemServices(ctx context.Context, entries []Service
 			Host:          p.hostName,
 			Description:   description,
 			ReadOnly:      entry.ReadOnly,
+			Ports:         portsToPortInfo(entry.Ports),
 		})
 
 		// Remove from desired units to track what we found
@@ -180,10 +229,12 @@ func (p *Provider) getLocalSystemServices(ctx context.Context, entries []Service
 				Source:        "systemd",
 				Host:          p.hostName,
 				ReadOnly:      entry.ReadOnly,
+			Ports:         portsToPortInfo(entry.Ports),
 			})
 			continue
 		}
 		info.ReadOnly = entry.ReadOnly
+		info.Ports = portsToPortInfo(entry.Ports)
 		result = append(result, info)
 	}
 
@@ -221,6 +272,7 @@ func (p *Provider) getLocalUserServices(ctx context.Context, entries []ServiceEn
 						Source:        "systemd",
 						Host:          p.hostName,
 						ReadOnly:      entry.ReadOnly,
+						Ports:         portsToPortInfo(entry.Ports),
 					})
 					continue
 				}
@@ -241,6 +293,7 @@ func (p *Provider) getLocalUserServices(ctx context.Context, entries []ServiceEn
 						Source:        "systemd",
 						Host:          p.hostName,
 						ReadOnly:      entry.ReadOnly,
+						Ports:         portsToPortInfo(entry.Ports),
 					})
 					continue
 				}
@@ -289,6 +342,7 @@ func (p *Provider) getUserUnitInfo(ctx context.Context, conn *dbus.Conn, entry S
 		Host:          p.hostName,
 		Description:   description,
 		ReadOnly:      entry.ReadOnly,
+		Ports:         portsToPortInfo(entry.Ports),
 	}, nil
 }
 
@@ -339,6 +393,7 @@ func (p *Provider) getUserUnitInfoViaExec(ctx context.Context, entry ServiceEntr
 		Host:          p.hostName,
 		Description:   description,
 		ReadOnly:      entry.ReadOnly,
+		Ports:         portsToPortInfo(entry.Ports),
 	}, nil
 }
 
@@ -419,10 +474,12 @@ func (p *Provider) getRemoteServices(ctx context.Context) ([]services.ServiceInf
 				Source:        "systemd",
 				Host:          p.hostName,
 				ReadOnly:      entry.ReadOnly,
+				Ports:         portsToPortInfo(entry.Ports),
 			})
 			continue
 		}
 		info.ReadOnly = entry.ReadOnly
+		info.Ports = portsToPortInfo(entry.Ports)
 		result = append(result, info)
 	}
 
@@ -436,8 +493,9 @@ func (p *Provider) getRemoteUserUnitInfo(ctx context.Context, entry ServiceEntry
 	shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) systemctl --user show %s --property=ActiveState,SubState,LoadState,Description",
 		entry.User, entry.User, entry.Name)
 
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-		p.address, "bash", "-c", shellCmd)
+	sshArgs := p.getSSHBaseArgs()
+	sshArgs = append(sshArgs, p.getSSHTarget(), "bash", "-c", shellCmd)
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -479,13 +537,15 @@ func (p *Provider) getRemoteUserUnitInfo(ctx context.Context, entry ServiceEntry
 		Host:          p.hostName,
 		Description:   description,
 		ReadOnly:      entry.ReadOnly,
+		Ports:         portsToPortInfo(entry.Ports),
 	}, nil
 }
 
 // getRemoteUnitInfo gets info for a single unit via SSH.
 func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (services.ServiceInfo, error) {
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-		p.address, "systemctl", "show", unitName, "--property=ActiveState,SubState,LoadState,Description")
+	sshArgs := p.getSSHBaseArgs()
+	sshArgs = append(sshArgs, p.getSSHTarget(), "systemctl", "show", unitName, "--property=ActiveState,SubState,LoadState,Description")
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -533,11 +593,12 @@ func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (serv
 func (p *Provider) GetService(name string) (services.Service, error) {
 	entry, _ := p.findEntry(name)
 	return &SystemdService{
-		unitName: name,
-		hostName: p.hostName,
-		address:  p.address,
-		isLocal:  p.isLocal,
-		user:     entry.User,
+		unitName:  name,
+		hostName:  p.hostName,
+		address:   p.address,
+		isLocal:   p.isLocal,
+		user:      entry.User,
+		sshConfig: p.sshConfig,
 	}, nil
 }
 
@@ -545,22 +606,41 @@ func (p *Provider) GetService(name string) (services.Service, error) {
 func (p *Provider) GetLogs(ctx context.Context, unitName string, tailLines int, follow bool) (io.ReadCloser, error) {
 	entry, _ := p.findEntry(unitName)
 	svc := &SystemdService{
-		unitName: unitName,
-		hostName: p.hostName,
-		address:  p.address,
-		isLocal:  p.isLocal,
-		user:     entry.User,
+		unitName:  unitName,
+		hostName:  p.hostName,
+		address:   p.address,
+		isLocal:   p.isLocal,
+		user:      entry.User,
+		sshConfig: p.sshConfig,
 	}
 	return svc.GetLogs(ctx, tailLines, follow)
 }
 
 // SystemdService represents a single systemd unit.
 type SystemdService struct {
-	unitName string
-	hostName string
-	address  string
-	isLocal  bool
-	user     string // User for user-level services (empty for system services)
+	unitName  string
+	hostName  string
+	address   string
+	isLocal   bool
+	user      string     // User for user-level services (empty for system services)
+	sshConfig *SSHConfig // SSH configuration for remote hosts
+}
+
+// getSSHTarget returns the SSH target string (user@host or just host).
+func (s *SystemdService) getSSHTarget() string {
+	if s.sshConfig != nil && s.sshConfig.Username != "" {
+		return s.sshConfig.Username + "@" + s.address
+	}
+	return s.address
+}
+
+// getSSHBaseArgs returns the common SSH arguments including port if configured.
+func (s *SystemdService) getSSHBaseArgs() []string {
+	args := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new"}
+	if s.sshConfig != nil && s.sshConfig.Port > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", s.sshConfig.Port))
+	}
+	return args
 }
 
 // GetInfo returns the current status of the unit.
@@ -735,10 +815,12 @@ func (s *SystemdService) GetLogs(ctx context.Context, tailLines int, follow bool
 			userArgs := append([]string{"--user"}, args...)
 			shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) journalctl %s",
 				s.user, s.user, strings.Join(userArgs, " "))
-			cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-				s.address, "bash", "-c", shellCmd)
+			sshArgs := s.getSSHBaseArgs()
+			sshArgs = append(sshArgs, s.getSSHTarget(), "bash", "-c", shellCmd)
+			cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 		} else {
-			sshArgs := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", s.address, "journalctl"}
+			sshArgs := s.getSSHBaseArgs()
+			sshArgs = append(sshArgs, s.getSSHTarget(), "journalctl")
 			sshArgs = append(sshArgs, args...)
 			cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 		}
@@ -892,12 +974,14 @@ func (s *SystemdService) runRemoteSystemctl(ctx context.Context, action string) 
 		// For user services, run systemctl --user as the specified user via sudo
 		shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) systemctl --user %s %s",
 			s.user, s.user, action, s.unitName)
-		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-			s.address, "bash", "-c", shellCmd)
+		sshArgs := s.getSSHBaseArgs()
+		sshArgs = append(sshArgs, s.getSSHTarget(), "bash", "-c", shellCmd)
+		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 	} else {
 		// System service uses sudo systemctl
-		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-			s.address, "sudo", "systemctl", action, s.unitName)
+		sshArgs := s.getSSHBaseArgs()
+		sshArgs = append(sshArgs, s.getSSHTarget(), "sudo", "systemctl", action, s.unitName)
+		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 	}
 
 	output, err := cmd.CombinedOutput()

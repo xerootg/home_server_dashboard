@@ -405,7 +405,7 @@ func TestNewProviderWithEntries_ReadOnly(t *testing.T) {
 		{Name: "nginx.service", ReadOnly: false},
 	}
 
-	p := NewProviderWithEntries("testhost", "localhost", entries)
+	p := NewProviderWithEntries("testhost", "localhost", entries, nil)
 
 	if len(p.entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(p.entries))
@@ -450,7 +450,7 @@ func TestGetService_ReadOnlyFlagPreserved(t *testing.T) {
 		{Name: "normal.service", ReadOnly: false},
 	}
 
-	p := NewProviderWithEntries("testhost", "192.168.1.100", entries)
+	p := NewProviderWithEntries("testhost", "192.168.1.100", entries, nil)
 
 	// Verify the entries are stored correctly in the provider
 	foundReadonly := false
@@ -486,7 +486,7 @@ func TestNewProviderWithEntries_UserServices(t *testing.T) {
 		{Name: "backup.timer", User: "alice", ReadOnly: true},
 	}
 
-	p := NewProviderWithEntries("testhost", "localhost", entries)
+	p := NewProviderWithEntries("testhost", "localhost", entries, nil)
 
 	if len(p.entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(p.entries))
@@ -524,7 +524,7 @@ func TestGetService_UserFieldPreserved(t *testing.T) {
 		{Name: "user.service", User: "testuser", ReadOnly: false},
 	}
 
-	p := NewProviderWithEntries("testhost", "192.168.1.100", entries)
+	p := NewProviderWithEntries("testhost", "192.168.1.100", entries, nil)
 
 	t.Run("system service has no user", func(t *testing.T) {
 		svc, err := p.GetService("system.service")
@@ -556,7 +556,7 @@ func TestFindEntry(t *testing.T) {
 		{Name: "zunesync.service", User: "xero", ReadOnly: true},
 	}
 
-	p := NewProviderWithEntries("testhost", "localhost", entries)
+	p := NewProviderWithEntries("testhost", "localhost", entries, nil)
 
 	t.Run("find existing system entry", func(t *testing.T) {
 		entry, found := p.findEntry("docker.service")
@@ -591,6 +591,144 @@ func TestFindEntry(t *testing.T) {
 		_, found := p.findEntry("nonexistent.service")
 		if found {
 			t.Error("expected not to find nonexistent.service")
+		}
+	})
+}
+
+// TestNewProviderWithEntries_SSHConfig tests that SSH config is stored and propagated.
+func TestNewProviderWithEntries_SSHConfig(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "docker.service", ReadOnly: false},
+	}
+
+	t.Run("nil SSHConfig is allowed", func(t *testing.T) {
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, nil)
+		if p.sshConfig != nil {
+			t.Error("expected sshConfig to be nil")
+		}
+	})
+
+	t.Run("SSHConfig is stored", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "admin", Port: 2222}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+
+		if p.sshConfig == nil {
+			t.Fatal("sshConfig is nil")
+		}
+		if p.sshConfig.Username != "admin" {
+			t.Errorf("Username = %q, want admin", p.sshConfig.Username)
+		}
+		if p.sshConfig.Port != 2222 {
+			t.Errorf("Port = %d, want 2222", p.sshConfig.Port)
+		}
+	})
+
+	t.Run("SSHConfig propagates to SystemdService", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "root", Port: 22}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+
+		svc, err := p.GetService("docker.service")
+		if err != nil {
+			t.Fatalf("GetService failed: %v", err)
+		}
+
+		systemdSvc := svc.(*SystemdService)
+		if systemdSvc.sshConfig == nil {
+			t.Fatal("SystemdService sshConfig is nil")
+		}
+		if systemdSvc.sshConfig.Username != "root" {
+			t.Errorf("Username = %q, want root", systemdSvc.sshConfig.Username)
+		}
+		if systemdSvc.sshConfig.Port != 22 {
+			t.Errorf("Port = %d, want 22", systemdSvc.sshConfig.Port)
+		}
+	})
+}
+
+// TestProvider_getSSHTarget tests the SSH target string generation.
+func TestProvider_getSSHTarget(t *testing.T) {
+	entries := []ServiceEntry{{Name: "test.service"}}
+
+	t.Run("no SSHConfig returns just address", func(t *testing.T) {
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, nil)
+		target := p.getSSHTarget()
+		if target != "192.168.1.100" {
+			t.Errorf("getSSHTarget() = %q, want 192.168.1.100", target)
+		}
+	})
+
+	t.Run("with username returns user@address", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "root", Port: 22}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+		target := p.getSSHTarget()
+		if target != "root@192.168.1.100" {
+			t.Errorf("getSSHTarget() = %q, want root@192.168.1.100", target)
+		}
+	})
+
+	t.Run("empty username returns just address", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "", Port: 2222}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+		target := p.getSSHTarget()
+		if target != "192.168.1.100" {
+			t.Errorf("getSSHTarget() = %q, want 192.168.1.100", target)
+		}
+	})
+}
+
+// TestProvider_getSSHBaseArgs tests the SSH base arguments generation.
+func TestProvider_getSSHBaseArgs(t *testing.T) {
+	entries := []ServiceEntry{{Name: "test.service"}}
+
+	t.Run("no SSHConfig returns base args only", func(t *testing.T) {
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, nil)
+		args := p.getSSHBaseArgs()
+
+		// Should have ConnectTimeout and StrictHostKeyChecking
+		if len(args) != 4 {
+			t.Errorf("getSSHBaseArgs() returned %d args, want 4", len(args))
+		}
+		// Should not have -p flag
+		for _, arg := range args {
+			if arg == "-p" {
+				t.Error("getSSHBaseArgs() should not include -p when port is 0")
+			}
+		}
+	})
+
+	t.Run("with custom port includes -p flag", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "root", Port: 2222}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+		args := p.getSSHBaseArgs()
+
+		// Should have base args + -p + port number
+		if len(args) != 6 {
+			t.Errorf("getSSHBaseArgs() returned %d args, want 6", len(args))
+		}
+
+		// Find -p flag and check its value
+		foundPort := false
+		for i, arg := range args {
+			if arg == "-p" && i+1 < len(args) && args[i+1] == "2222" {
+				foundPort = true
+				break
+			}
+		}
+		if !foundPort {
+			t.Error("getSSHBaseArgs() should include -p 2222")
+		}
+	})
+
+	t.Run("zero port does not include -p flag", func(t *testing.T) {
+		sshConfig := &SSHConfig{Username: "root", Port: 0}
+		p := NewProviderWithEntries("testhost", "192.168.1.100", entries, sshConfig)
+		args := p.getSSHBaseArgs()
+
+		// Should not have -p flag
+		for _, arg := range args {
+			if arg == "-p" {
+				t.Error("getSSHBaseArgs() should not include -p when port is 0")
+			}
 		}
 	})
 }

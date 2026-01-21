@@ -12,16 +12,18 @@
         "docker.service",
         "nas-dashboard.service:ro",  // :ro suffix makes service read-only (no start/stop/restart)
         "username:something.service:ro",  // readonly service running as username
-        "user2:else.service#8080" // non-readonly service running as username, exposing port 8080
+        "user2:else.service#8080",  // non-readonly service running as username, exposing port 8080
+        "webapp.service#8080,8443",  // service exposing multiple ports
+        "api.service#3000:ro"  // readonly service with port
       ],
       "docker_compose_roots": [
         "/some/folder/"
       ],
       // Watchtower integration: suppress false-positive notifications during container updates
       "watchtower": {
-        "port": 8080,                    // Watchtower HTTP API port (default 8080)
+        "port": 8080, // Watchtower HTTP API port (default 8080)
         "token": "your-token",
-        "update_timeout": 120            // Seconds to wait for container to recover (default 120)
+        "update_timeout": 120 // Seconds to wait for container to recover (default 120)
       },
       "traefik": {
         "enabled": true,
@@ -31,6 +33,10 @@
     {
       "name": "anotherhost",
       "address": "192.168.1.9",
+      "ssh_config": {
+        "username": "root", // because you only die once ;) no, really, embedded device that only has root in this case
+        "port": 22
+      },
       "systemd_services": [
         "docker.service",
         "ollama.service"

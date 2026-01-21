@@ -83,10 +83,20 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 				Name:     entry.Name,
 				User:     entry.User,
 				ReadOnly: entry.ReadOnly,
+				Ports:    entry.Ports,
 			})
 		}
 
-		systemdProvider := systemd.NewProviderWithEntries(host.Name, host.Address, systemdEntries)
+		// Convert SSH config if present
+		var sshConfig *systemd.SSHConfig
+		if host.SSHConfig != nil {
+			sshConfig = &systemd.SSHConfig{
+				Username: host.SSHConfig.Username,
+				Port:     host.SSHConfig.Port,
+			}
+		}
+
+		systemdProvider := systemd.NewProviderWithEntries(host.Name, host.Address, systemdEntries, sshConfig)
 		systemdServices, err := systemdProvider.GetServices(ctx)
 		if err != nil {
 			log.Printf("Warning: failed to get systemd services from %s: %v", host.Name, err)
@@ -175,7 +185,16 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 			continue
 		}
 
-		traefikProvider := traefik.NewProvider(host.Name, host.Address, host.Traefik.APIPort)
+		// Convert SSH config if present
+		var traefikSSHConfig *traefik.SSHConfig
+		if host.SSHConfig != nil {
+			traefikSSHConfig = &traefik.SSHConfig{
+				Username: host.SSHConfig.Username,
+				Port:     host.SSHConfig.Port,
+			}
+		}
+
+		traefikProvider := traefik.NewProvider(host.Name, host.Address, host.Traefik.APIPort, traefikSSHConfig)
 		defer traefikProvider.Close()
 
 		traefikServices, err := traefikProvider.GetServices(ctx, existingServices)
@@ -279,7 +298,16 @@ func enrichWithTraefikURLs(ctx context.Context, cfg *config.Config, svcList []se
 			continue
 		}
 
-		client := traefik.NewClient(host.Name, host.Address, host.Traefik.APIPort)
+		// Convert SSH config if present
+		var sshConfig *traefik.SSHConfig
+		if host.SSHConfig != nil {
+			sshConfig = &traefik.SSHConfig{
+				Username: host.SSHConfig.Username,
+				Port:     host.SSHConfig.Port,
+			}
+		}
+
+		client := traefik.NewClient(host.Name, host.Address, host.Traefik.APIPort, sshConfig)
 		defer client.Close()
 
 		mappings, err := client.GetServiceHostMappings(ctx)
@@ -425,9 +453,17 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	hostAddress := "localhost"
 	var serviceEntry systemd.ServiceEntry
+	var sshConfig *systemd.SSHConfig
 	if cfg != nil {
 		if host := cfg.GetHostByName(hostName); host != nil {
 			hostAddress = host.Address
+			// Convert SSH config if present
+			if host.SSHConfig != nil {
+				sshConfig = &systemd.SSHConfig{
+					Username: host.SSHConfig.Username,
+					Port:     host.SSHConfig.Port,
+				}
+			}
 			// Look up the service entry to get user information
 			for _, entry := range host.GetSystemdServiceEntries() {
 				if entry.Name == unitName {
@@ -435,6 +471,7 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 						Name:     entry.Name,
 						User:     entry.User,
 						ReadOnly: entry.ReadOnly,
+						Ports:    entry.Ports,
 					}
 					break
 				}
@@ -461,7 +498,7 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Create systemd provider for this host with the full service entry
-	systemdProvider := systemd.NewProviderWithEntries(hostName, hostAddress, []systemd.ServiceEntry{serviceEntry})
+	systemdProvider := systemd.NewProviderWithEntries(hostName, hostAddress, []systemd.ServiceEntry{serviceEntry}, sshConfig)
 	logs, err := systemdProvider.GetLogs(ctx, unitName, 100, true)
 	if err != nil {
 		fmt.Fprintf(w, "data: Error starting journalctl: %v\n\n", err)
@@ -1095,13 +1132,36 @@ func findComposeFile(dir string) string {
 func handleSystemdAction(ctx context.Context, cfg *config.Config, req ServiceActionRequest, action string, sendEvent func(string, string)) error {
 	// Find the host config
 	hostAddress := "localhost"
+	var sshConfig *systemd.SSHConfig
+	var serviceEntry systemd.ServiceEntry
+	serviceEntry.Name = req.ServiceName
+
 	if cfg != nil {
 		if host := cfg.GetHostByName(req.Host); host != nil {
 			hostAddress = host.Address
+			// Convert SSH config if present
+			if host.SSHConfig != nil {
+				sshConfig = &systemd.SSHConfig{
+					Username: host.SSHConfig.Username,
+					Port:     host.SSHConfig.Port,
+				}
+			}
+			// Look up the service entry to get user information
+			for _, entry := range host.GetSystemdServiceEntries() {
+				if entry.Name == req.ServiceName {
+					serviceEntry = systemd.ServiceEntry{
+						Name:     entry.Name,
+						User:     entry.User,
+						ReadOnly: entry.ReadOnly,
+						Ports:    entry.Ports,
+					}
+					break
+				}
+			}
 		}
 	}
 
-	systemdProvider := systemd.NewProvider(req.Host, hostAddress, []string{req.ServiceName})
+	systemdProvider := systemd.NewProviderWithEntries(req.Host, hostAddress, []systemd.ServiceEntry{serviceEntry}, sshConfig)
 	svc, err := systemdProvider.GetService(req.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to get service: %w", err)

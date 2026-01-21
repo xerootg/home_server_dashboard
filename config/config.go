@@ -69,6 +69,16 @@ type HomeAssistantConfig struct {
 	SSHAddonPort int `json:"ssh_addon_port,omitempty"`
 }
 
+// SSHConfig holds SSH connection settings for remote hosts.
+type SSHConfig struct {
+	// Username is the SSH username to use when connecting to remote hosts.
+	// If empty, the default SSH user (usually current user) is used.
+	Username string `json:"username,omitempty"`
+	// Port is the SSH port to use when connecting to remote hosts.
+	// If 0, the default SSH port (22) is used.
+	Port int `json:"port,omitempty"`
+}
+
 // WatchtowerConfig holds Watchtower API connection settings for a host.
 // Watchtower is a container update service that automatically updates Docker containers.
 // When configured, the dashboard will suppress false-positive service down notifications
@@ -89,6 +99,7 @@ type HostConfig struct {
 	Name               string               `json:"name"`
 	Address            string               `json:"address"`
 	NIC                []string             `json:"nic"`
+	SSHConfig          *SSHConfig           `json:"ssh_config,omitempty"`
 	SystemdServices    []string             `json:"systemd_services"`
 	DockerComposeRoots []string             `json:"docker_compose_roots"`
 	Traefik            TraefikConfig        `json:"traefik"`
@@ -105,14 +116,21 @@ type SystemdServiceEntry struct {
 	User string
 	// ReadOnly if true, disables start/stop/restart actions for ALL users
 	ReadOnly bool
+	// Ports are the port numbers advertised for this service in the UI
+	Ports []uint16
 }
 
 // GetSystemdServiceEntries parses the SystemdServices list and returns entries with flags.
 // Service names support the following formats:
 //   - "servicename.service" - system service
 //   - "servicename.service:ro" - system service, read-only
+//   - "servicename.service#8080" - system service exposing port 8080
+//   - "servicename.service#8080,8443" - system service exposing multiple ports
+//   - "servicename.service#8080:ro" - read-only service with ports
 //   - "username:servicename.service" - user service (managed via systemctl --user)
 //   - "username:servicename.service:ro" - user service, read-only
+//   - "username:servicename.service#8080" - user service with ports
+//   - "username:servicename.service#8080,8443:ro" - user service with ports, read-only
 //
 // Examples:
 //   - "docker.service" returns {Name: "docker.service", User: "", ReadOnly: false}
@@ -143,10 +161,15 @@ func (h *HostConfig) GetSystemdServiceNames() []string {
 // Recognizes the following formats:
 //   - "servicename.service" - system service
 //   - "servicename.service:ro" - system service, read-only
+//   - "servicename.service#8080" - system service with port
+//   - "servicename.service#8080,8443" - system service with multiple ports
+//   - "servicename.service#8080:ro" - read-only service with port
 //   - "username:servicename.service" - user service
 //   - "username:servicename.service:ro" - user service, read-only
+//   - "username:servicename.service#8080" - user service with port
+//   - "username:servicename.service#8080,8443:ro" - user service with ports, read-only
 //
-// The parser first strips any ":ro" suffix, then checks for a "username:" prefix.
+// The parser strips suffixes in order: ":ro", then "#ports", then checks for "username:" prefix.
 // A username prefix is identified by finding a colon before a dot (systemd units always
 // have an extension like .service, .timer, .socket, etc.).
 func ParseSystemdServiceEntry(entry string) SystemdServiceEntry {
@@ -156,6 +179,25 @@ func ParseSystemdServiceEntry(entry string) SystemdServiceEntry {
 	if strings.HasSuffix(entry, ":ro") {
 		entry = strings.TrimSuffix(entry, ":ro")
 		result.ReadOnly = true
+	}
+
+	// Check for #ports suffix (comma-separated port numbers)
+	if hashIdx := strings.LastIndex(entry, "#"); hashIdx > 0 {
+		portStr := entry[hashIdx+1:]
+		entry = entry[:hashIdx]
+
+		// Parse comma-separated port numbers
+		portParts := strings.Split(portStr, ",")
+		for _, portPart := range portParts {
+			portPart = strings.TrimSpace(portPart)
+			if portPart == "" {
+				continue
+			}
+			var port uint64
+			if _, err := fmt.Sscanf(portPart, "%d", &port); err == nil && port > 0 && port <= 65535 {
+				result.Ports = append(result.Ports, uint16(port))
+			}
+		}
 	}
 
 	// Check for username:servicename format
@@ -230,6 +272,44 @@ func (h *HostConfig) GetWatchtowerUpdateTimeout() int {
 		return 120
 	}
 	return h.Watchtower.UpdateTimeout
+}
+
+// GetSSHUser returns the SSH username for this host.
+// Returns empty string if no custom SSH user is configured (uses system default).
+func (h *HostConfig) GetSSHUser() string {
+	if h.SSHConfig == nil {
+		return ""
+	}
+	return h.SSHConfig.Username
+}
+
+// GetSSHPort returns the SSH port for this host.
+// Returns 0 if no custom SSH port is configured (uses system default port 22).
+func (h *HostConfig) GetSSHPort() int {
+	if h.SSHConfig == nil {
+		return 0
+	}
+	return h.SSHConfig.Port
+}
+
+// GetSSHTarget returns the SSH target string for this host.
+// Format is "user@address" if a custom user is set, otherwise just "address".
+// For use with SSH commands.
+func (h *HostConfig) GetSSHTarget() string {
+	if user := h.GetSSHUser(); user != "" {
+		return user + "@" + h.Address
+	}
+	return h.Address
+}
+
+// GetSSHArgs returns common SSH arguments including port if configured.
+// Returns arguments suitable for prepending to SSH commands.
+func (h *HostConfig) GetSSHArgs() []string {
+	args := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new"}
+	if port := h.GetSSHPort(); port > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", port))
+	}
+	return args
 }
 
 // GetHomeAssistantEndpoint returns the full URL for the Home Assistant API.

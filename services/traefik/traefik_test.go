@@ -125,7 +125,7 @@ func TestNormalizeServiceName(t *testing.T) {
 }
 
 func TestNewClient(t *testing.T) {
-	client := NewClient("testhost", "192.168.1.100", 8080)
+	client := NewClient("testhost", "192.168.1.100", 8080, nil)
 	if client == nil {
 		t.Fatal("NewClient returned nil")
 	}
@@ -141,7 +141,7 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClientDefaultPort(t *testing.T) {
-	client := NewClient("testhost", "localhost", 0)
+	client := NewClient("testhost", "localhost", 0, nil)
 	if client.apiPort != 8080 {
 		t.Errorf("apiPort = %d, expected default 8080", client.apiPort)
 	}
@@ -160,7 +160,7 @@ func TestClientIsLocal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.address, func(t *testing.T) {
-			client := NewClient("test", tt.address, 8080)
+			client := NewClient("test", tt.address, 8080, nil)
 			if client.isLocal() != tt.expected {
 				t.Errorf("isLocal() for address %q = %v, expected %v", tt.address, client.isLocal(), tt.expected)
 			}
@@ -385,7 +385,7 @@ func TestGetClaimedBackendServices(t *testing.T) {
 	defer server.Close()
 
 	// Create client (we'll manually override the URL for testing)
-	client := NewClient("test", "localhost", 8080)
+	client := NewClient("test", "localhost", 8080, nil)
 	defer client.Close()
 
 	// Parse server URL to get port

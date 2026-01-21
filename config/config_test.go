@@ -1112,22 +1112,36 @@ func TestParseSystemdServiceEntry(t *testing.T) {
 		wantName     string
 		wantUser     string
 		wantReadOnly bool
+		wantPorts    []uint16
 	}{
-		{"plain service name", "docker.service", "docker.service", "", false},
-		{"readonly service", "nas-dashboard.service:ro", "nas-dashboard.service", "", true},
-		{"uppercase RO ignored", "test.service:RO", "test.service:RO", "", false},
-		{"empty string", "", "", "", false},
-		{"only :ro suffix", ":ro", "", "", true},
+		{"plain service name", "docker.service", "docker.service", "", false, nil},
+		{"readonly service", "nas-dashboard.service:ro", "nas-dashboard.service", "", true, nil},
+		{"uppercase RO ignored", "test.service:RO", "test.service:RO", "", false, nil},
+		{"empty string", "", "", "", false, nil},
+		{"only :ro suffix", ":ro", "", "", true, nil},
 		// User service tests
-		{"user service", "xero:zunesync.service", "zunesync.service", "xero", false},
-		{"user service readonly", "xero:zunesync.service:ro", "zunesync.service", "xero", true},
-		{"user service with timer", "alice:backup.timer", "backup.timer", "alice", false},
-		{"user service with timer readonly", "bob:cleanup.timer:ro", "cleanup.timer", "bob", true},
-		{"user service with socket", "user:myapp.socket", "myapp.socket", "user", false},
+		{"user service", "xero:zunesync.service", "zunesync.service", "xero", false, nil},
+		{"user service readonly", "xero:zunesync.service:ro", "zunesync.service", "xero", true, nil},
+		{"user service with timer", "alice:backup.timer", "backup.timer", "alice", false, nil},
+		{"user service with timer readonly", "bob:cleanup.timer:ro", "cleanup.timer", "bob", true, nil},
+		{"user service with socket", "user:myapp.socket", "myapp.socket", "user", false, nil},
 		// Edge cases: no dot means no user prefix detection (backwards compat for weird names)
-		{"no dot in name", "nodot", "nodot", "", false},
-		{"colon but no dot", "some:thing", "some:thing", "", false},
-		{"colon after dot", "my.weird:name.service", "my.weird:name.service", "", false},
+		{"no dot in name", "nodot", "nodot", "", false, nil},
+		{"colon but no dot", "some:thing", "some:thing", "", false, nil},
+		{"colon after dot", "my.weird:name.service", "my.weird:name.service", "", false, nil},
+		// Port tests
+		{"service with single port", "myapp.service#8080", "myapp.service", "", false, []uint16{8080}},
+		{"service with multiple ports", "myapp.service#8080,8443", "myapp.service", "", false, []uint16{8080, 8443}},
+		{"service with ports and readonly", "myapp.service#8080:ro", "myapp.service", "", true, []uint16{8080}},
+		{"service with multiple ports and readonly", "myapp.service#8080,9000:ro", "myapp.service", "", true, []uint16{8080, 9000}},
+		{"user service with port", "xero:myapp.service#3000", "myapp.service", "xero", false, []uint16{3000}},
+		{"user service with ports and readonly", "xero:myapp.service#3000,4000:ro", "myapp.service", "xero", true, []uint16{3000, 4000}},
+		{"port with spaces", "myapp.service#8080, 8443", "myapp.service", "", false, []uint16{8080, 8443}},
+		{"empty port ignored", "myapp.service#8080,,9000", "myapp.service", "", false, []uint16{8080, 9000}},
+		{"invalid port ignored", "myapp.service#8080,invalid,9000", "myapp.service", "", false, []uint16{8080, 9000}},
+		{"port 0 ignored", "myapp.service#0,8080", "myapp.service", "", false, []uint16{8080}},
+		{"port over 65535 ignored", "myapp.service#8080,99999", "myapp.service", "", false, []uint16{8080}},
+		{"just hash no ports", "myapp.service#", "myapp.service", "", false, nil},
 	}
 
 	for _, tt := range tests {
@@ -1142,6 +1156,15 @@ func TestParseSystemdServiceEntry(t *testing.T) {
 			if result.ReadOnly != tt.wantReadOnly {
 				t.Errorf("ReadOnly = %v, want %v", result.ReadOnly, tt.wantReadOnly)
 			}
+			if len(result.Ports) != len(tt.wantPorts) {
+				t.Errorf("Ports = %v, want %v", result.Ports, tt.wantPorts)
+			} else {
+				for i, port := range result.Ports {
+					if port != tt.wantPorts[i] {
+						t.Errorf("Ports[%d] = %d, want %d", i, port, tt.wantPorts[i])
+					}
+				}
+			}
 		})
 	}
 }
@@ -1154,13 +1177,14 @@ func TestHostConfig_GetSystemdServiceEntries(t *testing.T) {
 			"docker.service",
 			"nas-dashboard.service:ro",
 			"nginx.service",
+			"webapp.service#8080,8443",
 		},
 	}
 
 	entries := host.GetSystemdServiceEntries()
 
-	if len(entries) != 3 {
-		t.Fatalf("Expected 3 entries, got %d", len(entries))
+	if len(entries) != 4 {
+		t.Fatalf("Expected 4 entries, got %d", len(entries))
 	}
 
 	// Check first entry (not readonly)
@@ -1169,6 +1193,9 @@ func TestHostConfig_GetSystemdServiceEntries(t *testing.T) {
 	}
 	if entries[0].ReadOnly {
 		t.Error("entries[0].ReadOnly = true, want false")
+	}
+	if len(entries[0].Ports) != 0 {
+		t.Errorf("entries[0].Ports = %v, want nil", entries[0].Ports)
 	}
 
 	// Check second entry (readonly)
@@ -1185,6 +1212,21 @@ func TestHostConfig_GetSystemdServiceEntries(t *testing.T) {
 	}
 	if entries[2].ReadOnly {
 		t.Error("entries[2].ReadOnly = true, want false")
+	}
+
+	// Check fourth entry (with ports)
+	if entries[3].Name != "webapp.service" {
+		t.Errorf("entries[3].Name = %q, want %q", entries[3].Name, "webapp.service")
+	}
+	if len(entries[3].Ports) != 2 {
+		t.Errorf("entries[3].Ports length = %d, want 2", len(entries[3].Ports))
+	} else {
+		if entries[3].Ports[0] != 8080 {
+			t.Errorf("entries[3].Ports[0] = %d, want 8080", entries[3].Ports[0])
+		}
+		if entries[3].Ports[1] != 8443 {
+			t.Errorf("entries[3].Ports[1] = %d, want 8443", entries[3].Ports[1])
+		}
 	}
 }
 
@@ -1423,4 +1465,212 @@ func TestWatchtowerConfig_GetWatchtowerToken(t *testing.T) {
 			t.Errorf("GetWatchtowerToken() = %v, want empty string", result)
 		}
 	})
+}
+
+// TestHostConfig_GetSSHUser tests the SSH username helper method.
+func TestHostConfig_GetSSHUser(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected string
+	}{
+		{
+			name:     "nil SSHConfig returns empty",
+			host:     HostConfig{Name: "test"},
+			expected: "",
+		},
+		{
+			name: "empty username returns empty",
+			host: HostConfig{
+				Name:      "test",
+				SSHConfig: &SSHConfig{Username: "", Port: 22},
+			},
+			expected: "",
+		},
+		{
+			name: "returns configured username",
+			host: HostConfig{
+				Name:      "test",
+				SSHConfig: &SSHConfig{Username: "root", Port: 22},
+			},
+			expected: "root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.host.GetSSHUser(); got != tt.expected {
+				t.Errorf("GetSSHUser() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestHostConfig_GetSSHPort tests the SSH port helper method.
+func TestHostConfig_GetSSHPort(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected int
+	}{
+		{
+			name:     "nil SSHConfig returns 0",
+			host:     HostConfig{Name: "test"},
+			expected: 0,
+		},
+		{
+			name: "zero port returns 0",
+			host: HostConfig{
+				Name:      "test",
+				SSHConfig: &SSHConfig{Username: "root", Port: 0},
+			},
+			expected: 0,
+		},
+		{
+			name: "returns configured port",
+			host: HostConfig{
+				Name:      "test",
+				SSHConfig: &SSHConfig{Username: "root", Port: 2222},
+			},
+			expected: 2222,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.host.GetSSHPort(); got != tt.expected {
+				t.Errorf("GetSSHPort() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestHostConfig_GetSSHTarget tests the SSH target string generation.
+func TestHostConfig_GetSSHTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     HostConfig
+		expected string
+	}{
+		{
+			name:     "no SSHConfig returns just address",
+			host:     HostConfig{Name: "test", Address: "192.168.1.100"},
+			expected: "192.168.1.100",
+		},
+		{
+			name: "empty username returns just address",
+			host: HostConfig{
+				Name:      "test",
+				Address:   "192.168.1.100",
+				SSHConfig: &SSHConfig{Username: "", Port: 22},
+			},
+			expected: "192.168.1.100",
+		},
+		{
+			name: "with username returns user@address",
+			host: HostConfig{
+				Name:      "test",
+				Address:   "192.168.1.100",
+				SSHConfig: &SSHConfig{Username: "root", Port: 22},
+			},
+			expected: "root@192.168.1.100",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.host.GetSSHTarget(); got != tt.expected {
+				t.Errorf("GetSSHTarget() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestHostConfig_GetSSHArgs tests the SSH arguments generation.
+func TestHostConfig_GetSSHArgs(t *testing.T) {
+	t.Run("no SSHConfig returns base args only", func(t *testing.T) {
+		host := HostConfig{Name: "test", Address: "192.168.1.100"}
+		args := host.GetSSHArgs()
+
+		// Should have ConnectTimeout and StrictHostKeyChecking
+		if len(args) != 4 {
+			t.Errorf("GetSSHArgs() returned %d args, want 4", len(args))
+		}
+		// Should not have -p flag
+		for _, arg := range args {
+			if arg == "-p" {
+				t.Error("GetSSHArgs() should not include -p when port is 0")
+			}
+		}
+	})
+
+	t.Run("with custom port includes -p flag", func(t *testing.T) {
+		host := HostConfig{
+			Name:      "test",
+			Address:   "192.168.1.100",
+			SSHConfig: &SSHConfig{Username: "root", Port: 2222},
+		}
+		args := host.GetSSHArgs()
+
+		// Should have base args + -p + port number
+		if len(args) != 6 {
+			t.Errorf("GetSSHArgs() returned %d args, want 6", len(args))
+		}
+
+		// Find -p flag and check its value
+		foundPort := false
+		for i, arg := range args {
+			if arg == "-p" && i+1 < len(args) && args[i+1] == "2222" {
+				foundPort = true
+				break
+			}
+		}
+		if !foundPort {
+			t.Error("GetSSHArgs() should include -p 2222")
+		}
+	})
+}
+
+// TestLoad_SSHConfig tests that SSH config is loaded from JSON.
+func TestLoad_SSHConfig(t *testing.T) {
+	configJSON := `{
+		"hosts": [
+			{
+				"name": "remotehost",
+				"address": "192.168.1.100",
+				"ssh_config": {
+					"username": "admin",
+					"port": 2222
+				},
+				"systemd_services": ["docker.service"],
+				"docker_compose_roots": []
+			}
+		]
+	}`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "services.json")
+	if err := os.WriteFile(configPath, []byte(configJSON), 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.Hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(cfg.Hosts))
+	}
+
+	host := cfg.Hosts[0]
+	if host.SSHConfig == nil {
+		t.Fatal("SSHConfig is nil")
+	}
+	if host.SSHConfig.Username != "admin" {
+		t.Errorf("SSHConfig.Username = %v, want admin", host.SSHConfig.Username)
+	}
+	if host.SSHConfig.Port != 2222 {
+		t.Errorf("SSHConfig.Port = %v, want 2222", host.SSHConfig.Port)
+	}
 }

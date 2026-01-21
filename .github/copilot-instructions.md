@@ -183,7 +183,8 @@ home_server_dashboard/
 ### `config` Package
 - **Purpose:** Shared configuration loading from `services.json`
 - **Key Types:**
-  - `HostConfig` — Single host configuration with helper methods like `IsLocal()`, `GetPrivateIP()`
+  - `HostConfig` — Single host configuration with helper methods like `IsLocal()`, `GetPrivateIP()`, `GetSSHUser()`, `GetSSHPort()`, `GetSSHTarget()`, `GetSSHArgs()`
+  - `SSHConfig` — SSH connection settings for remote hosts (Username, Port)
   - `OIDCConfig` — OIDC authentication settings (ServiceURL, Callback, ConfigURL, ClientID, ClientSecret, GroupsClaim, AdminGroup, Groups)
   - `OIDCGroupConfig` — Group-based access control configuration (Services map)
   - `LocalConfig` — Local authentication settings (Admins)
@@ -446,7 +447,10 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
         "docker.service",               // System service (managed via systemctl)
         "nas-dashboard.service:ro",     // :ro = read-only (no start/stop/restart)
         "xero:zunesync.service",        // User service (username:servicename.service)
-        "alice:backup.timer:ro"         // User service, read-only
+        "alice:backup.timer:ro",        // User service, read-only
+        "webapp.service#8080",          // Service exposing port 8080
+        "api.service#8080,8443",        // Service exposing multiple ports
+        "bob:myapp.service#3000:ro"     // User service with port, read-only
       ],
       "docker_compose_roots": ["/home/xero/nas/"],
       "watchtower": {                   // Optional: Watchtower integration
@@ -457,6 +461,20 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
       "traefik": {
         "enabled": true,                // Enable Traefik hostname lookup
         "api_port": 8080                // Traefik API port (default 8080)
+      }
+    },
+    {
+      "name": "remoteserver",           // Remote host with custom SSH settings
+      "address": "192.168.1.100",       // IP or hostname (uses SSH)
+      "ssh_config": {                   // Optional: SSH connection settings
+        "username": "admin",            // SSH username (default: current user)
+        "port": 2222                    // SSH port (default: 22)
+      },
+      "systemd_services": ["docker.service", "nginx.service"],
+      "docker_compose_roots": [],
+      "traefik": {
+        "enabled": true,                // Traefik API accessed via SSH tunnel
+        "api_port": 8080
       }
     },
     {
@@ -596,6 +614,7 @@ Systemd services can be marked as read-only by appending `:ro` to the service na
 User-level systemd services (those in `~/.config/systemd/user/`) can be monitored using the `username:servicename.service` notation. User services:
 - Are managed via `systemctl --user` instead of the system D-Bus
 - Support the same `:ro` suffix for read-only mode
+- Support the same `#port1,port2` suffix for advertising ports
 - Display with the project name `systemd-user` to distinguish from system services
 - Show `username@servicename.service` as the container name for clarity
 
@@ -604,8 +623,12 @@ User-level systemd services (those in `~/.config/systemd/user/`) can be monitore
 "systemd_services": [
   "docker.service",               // System service
   "docker.service:ro",            // System service, read-only
+  "webapp.service#8080",          // System service exposing port 8080
+  "api.service#8080,8443",        // System service exposing multiple ports
+  "api.service#8080,8443:ro",     // System service with ports, read-only
   "xero:zunesync.service",        // User service for user 'xero'
   "xero:zunesync.service:ro",     // User service, read-only
+  "xero:myapp.service#3000",      // User service with port
   "alice:backup.timer",           // User timer unit
   "bob:cleanup.timer:ro"          // User timer, read-only
 ]

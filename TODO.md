@@ -45,6 +45,8 @@
 | Add resource leak analyzer (analysis/closerleak) for go vet-style detection of io.Closer leaks | ✅ Done |
 | Add omada status | |
 | when using wathctower, updates are reported as up/down's - we should integrate watchtower and if a service goes down, see if watchtower did it and not report it unless it doesn't come back up in some reasonable (configurable) timeout | ✅ Done |
+| refactor ssh commands into a ssh module so config can be passed in per host, i.e improved port/username piping, future keyfiles maybe | |
+| support categorical tagging for faster filtering, i.e. a category for music services regardless of host or provider | |
 
 ## cut
 | task | reason | reassess when |

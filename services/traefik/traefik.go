@@ -31,12 +31,23 @@ type Router struct {
 	EntryPoints []string `json:"entryPoints,omitempty"`
 }
 
+// SSHConfig holds SSH connection settings for remote hosts.
+type SSHConfig struct {
+	// Username is the SSH username to use when connecting.
+	// If empty, the default SSH user (usually current user) is used.
+	Username string
+	// Port is the SSH port to use when connecting.
+	// If 0, the default SSH port (22) is used.
+	Port int
+}
+
 // Client provides access to the Traefik API.
 type Client struct {
 	hostName    string
 	hostAddress string
 	apiPort     int
 	httpClient  *http.Client
+	sshConfig   *SSHConfig
 
 	// SSH tunnel management
 	tunnelMu  sync.Mutex
@@ -49,7 +60,8 @@ type Client struct {
 
 // NewClient creates a new Traefik API client.
 // For remote hosts, it will create an SSH tunnel when needed.
-func NewClient(hostName, hostAddress string, apiPort int) *Client {
+// sshConfig is optional and only used for remote hosts.
+func NewClient(hostName, hostAddress string, apiPort int, sshConfig *SSHConfig) *Client {
 	if apiPort == 0 {
 		apiPort = 8080 // Default Traefik API port
 	}
@@ -57,11 +69,20 @@ func NewClient(hostName, hostAddress string, apiPort int) *Client {
 		hostName:       hostName,
 		hostAddress:    hostAddress,
 		apiPort:        apiPort,
+		sshConfig:      sshConfig,
 		matcherService: NewMatcherLookupService(hostName),
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// getSSHTarget returns the SSH target string (user@host or just host).
+func (c *Client) getSSHTarget() string {
+	if c.sshConfig != nil && c.sshConfig.Username != "" {
+		return c.sshConfig.Username + "@" + c.hostAddress
+	}
+	return c.hostAddress
 }
 
 // isLocal returns true if the host address is localhost.
@@ -110,9 +131,10 @@ func (c *Client) ensureTunnel(ctx context.Context) (int, error) {
 	localPort := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	
+	// Build SSH arguments
 	// Create SSH tunnel: ssh -L localPort:localhost:apiPort -N hostAddress
 	// Use -o options to make it more robust for automated use
-	cmd := exec.CommandContext(ctx, "ssh",
+	sshArgs := []string{
 		"-L", fmt.Sprintf("%d:localhost:%d", localPort, c.apiPort),
 		"-N",                            // Don't execute remote command
 		"-o", "StrictHostKeyChecking=no",
@@ -120,8 +142,15 @@ func (c *Client) ensureTunnel(ctx context.Context) (int, error) {
 		"-o", "ConnectTimeout=5",
 		"-o", "ServerAliveInterval=30",
 		"-o", "ServerAliveCountMax=3",
-		c.hostAddress,
-	)
+	}
+	// Add custom SSH port if configured
+	if c.sshConfig != nil && c.sshConfig.Port > 0 {
+		sshArgs = append(sshArgs, "-p", fmt.Sprintf("%d", c.sshConfig.Port))
+	}
+	// Add target (user@host or just host)
+	sshArgs = append(sshArgs, c.getSSHTarget())
+	
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
 	
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("failed to start SSH tunnel: %w", err)

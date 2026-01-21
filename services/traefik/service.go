@@ -42,11 +42,12 @@ type Provider struct {
 }
 
 // NewProvider creates a new Traefik service provider.
-func NewProvider(hostName, hostAddress string, apiPort int) *Provider {
+// sshConfig is optional and only used for remote hosts.
+func NewProvider(hostName, hostAddress string, apiPort int, sshConfig *SSHConfig) *Provider {
 	return &Provider{
 		hostName:    hostName,
 		hostAddress: hostAddress,
-		client:      NewClient(hostName, hostAddress, apiPort),
+		client:      NewClient(hostName, hostAddress, apiPort, sshConfig),
 	}
 }
 
