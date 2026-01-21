@@ -1110,14 +1110,24 @@ func TestParseSystemdServiceEntry(t *testing.T) {
 		name         string
 		entry        string
 		wantName     string
+		wantUser     string
 		wantReadOnly bool
 	}{
-		{"plain service name", "docker.service", "docker.service", false},
-		{"readonly service", "nas-dashboard.service:ro", "nas-dashboard.service", true},
-		{"uppercase RO ignored", "test.service:RO", "test.service:RO", false},
-		{"empty string", "", "", false},
-		{"only :ro suffix", ":ro", "", true},
-		{"multiple colons", "some:thing:ro", "some:thing", true},
+		{"plain service name", "docker.service", "docker.service", "", false},
+		{"readonly service", "nas-dashboard.service:ro", "nas-dashboard.service", "", true},
+		{"uppercase RO ignored", "test.service:RO", "test.service:RO", "", false},
+		{"empty string", "", "", "", false},
+		{"only :ro suffix", ":ro", "", "", true},
+		// User service tests
+		{"user service", "xero:zunesync.service", "zunesync.service", "xero", false},
+		{"user service readonly", "xero:zunesync.service:ro", "zunesync.service", "xero", true},
+		{"user service with timer", "alice:backup.timer", "backup.timer", "alice", false},
+		{"user service with timer readonly", "bob:cleanup.timer:ro", "cleanup.timer", "bob", true},
+		{"user service with socket", "user:myapp.socket", "myapp.socket", "user", false},
+		// Edge cases: no dot means no user prefix detection (backwards compat for weird names)
+		{"no dot in name", "nodot", "nodot", "", false},
+		{"colon but no dot", "some:thing", "some:thing", "", false},
+		{"colon after dot", "my.weird:name.service", "my.weird:name.service", "", false},
 	}
 
 	for _, tt := range tests {
@@ -1125,6 +1135,9 @@ func TestParseSystemdServiceEntry(t *testing.T) {
 			result := ParseSystemdServiceEntry(tt.entry)
 			if result.Name != tt.wantName {
 				t.Errorf("Name = %q, want %q", result.Name, tt.wantName)
+			}
+			if result.User != tt.wantUser {
+				t.Errorf("User = %q, want %q", result.User, tt.wantUser)
 			}
 			if result.ReadOnly != tt.wantReadOnly {
 				t.Errorf("ReadOnly = %v, want %v", result.ReadOnly, tt.wantReadOnly)
@@ -1197,6 +1210,49 @@ func TestHostConfig_GetSystemdServiceNames(t *testing.T) {
 		if name != expected[i] {
 			t.Errorf("names[%d] = %q, want %q", i, name, expected[i])
 		}
+	}
+}
+
+func TestHostConfig_GetSystemdServiceEntriesWithUserServices(t *testing.T) {
+	host := HostConfig{
+		Name:    "testhost",
+		Address: "localhost",
+		SystemdServices: []string{
+			"docker.service",
+			"nas-dashboard.service:ro",
+			"xero:zunesync.service",
+			"alice:backup.timer:ro",
+		},
+	}
+
+	entries := host.GetSystemdServiceEntries()
+
+	if len(entries) != 4 {
+		t.Fatalf("Expected 4 entries, got %d", len(entries))
+	}
+
+	// Check first entry (system service, not readonly)
+	if entries[0].Name != "docker.service" || entries[0].User != "" || entries[0].ReadOnly {
+		t.Errorf("entries[0] = {Name: %q, User: %q, ReadOnly: %v}, want {Name: \"docker.service\", User: \"\", ReadOnly: false}",
+			entries[0].Name, entries[0].User, entries[0].ReadOnly)
+	}
+
+	// Check second entry (system service, readonly)
+	if entries[1].Name != "nas-dashboard.service" || entries[1].User != "" || !entries[1].ReadOnly {
+		t.Errorf("entries[1] = {Name: %q, User: %q, ReadOnly: %v}, want {Name: \"nas-dashboard.service\", User: \"\", ReadOnly: true}",
+			entries[1].Name, entries[1].User, entries[1].ReadOnly)
+	}
+
+	// Check third entry (user service, not readonly)
+	if entries[2].Name != "zunesync.service" || entries[2].User != "xero" || entries[2].ReadOnly {
+		t.Errorf("entries[2] = {Name: %q, User: %q, ReadOnly: %v}, want {Name: \"zunesync.service\", User: \"xero\", ReadOnly: false}",
+			entries[2].Name, entries[2].User, entries[2].ReadOnly)
+	}
+
+	// Check fourth entry (user service, readonly)
+	if entries[3].Name != "backup.timer" || entries[3].User != "alice" || !entries[3].ReadOnly {
+		t.Errorf("entries[3] = {Name: %q, User: %q, ReadOnly: %v}, want {Name: \"backup.timer\", User: \"alice\", ReadOnly: true}",
+			entries[3].Name, entries[3].User, entries[3].ReadOnly)
 	}
 }
 

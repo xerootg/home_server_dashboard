@@ -477,3 +477,120 @@ func TestGetService_ReadOnlyFlagPreserved(t *testing.T) {
 		t.Error("normal.service not found in provider entries")
 	}
 }
+
+// TestNewProviderWithEntries_UserServices tests that user services are handled correctly.
+func TestNewProviderWithEntries_UserServices(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "docker.service", User: "", ReadOnly: false},
+		{Name: "zunesync.service", User: "xero", ReadOnly: false},
+		{Name: "backup.timer", User: "alice", ReadOnly: true},
+	}
+
+	p := NewProviderWithEntries("testhost", "localhost", entries)
+
+	if len(p.entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(p.entries))
+	}
+
+	// Verify user and read-only flags are preserved
+	tests := []struct {
+		name     string
+		user     string
+		readOnly bool
+	}{
+		{"docker.service", "", false},
+		{"zunesync.service", "xero", false},
+		{"backup.timer", "alice", true},
+	}
+
+	for i, tt := range tests {
+		entry := p.entries[i]
+		if entry.Name != tt.name {
+			t.Errorf("entries[%d].Name = %q, want %q", i, entry.Name, tt.name)
+		}
+		if entry.User != tt.user {
+			t.Errorf("entries[%d].User = %q, want %q", i, entry.User, tt.user)
+		}
+		if entry.ReadOnly != tt.readOnly {
+			t.Errorf("entries[%d].ReadOnly = %v, want %v", i, entry.ReadOnly, tt.readOnly)
+		}
+	}
+}
+
+// TestGetService_UserFieldPreserved tests that user field is passed to SystemdService.
+func TestGetService_UserFieldPreserved(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "system.service", User: "", ReadOnly: false},
+		{Name: "user.service", User: "testuser", ReadOnly: false},
+	}
+
+	p := NewProviderWithEntries("testhost", "192.168.1.100", entries)
+
+	t.Run("system service has no user", func(t *testing.T) {
+		svc, err := p.GetService("system.service")
+		if err != nil {
+			t.Fatalf("GetService failed: %v", err)
+		}
+		systemdSvc := svc.(*SystemdService)
+		if systemdSvc.user != "" {
+			t.Errorf("user = %q, want empty string", systemdSvc.user)
+		}
+	})
+
+	t.Run("user service has user field set", func(t *testing.T) {
+		svc, err := p.GetService("user.service")
+		if err != nil {
+			t.Fatalf("GetService failed: %v", err)
+		}
+		systemdSvc := svc.(*SystemdService)
+		if systemdSvc.user != "testuser" {
+			t.Errorf("user = %q, want %q", systemdSvc.user, "testuser")
+		}
+	})
+}
+
+// TestFindEntry tests the findEntry helper method.
+func TestFindEntry(t *testing.T) {
+	entries := []ServiceEntry{
+		{Name: "docker.service", User: "", ReadOnly: false},
+		{Name: "zunesync.service", User: "xero", ReadOnly: true},
+	}
+
+	p := NewProviderWithEntries("testhost", "localhost", entries)
+
+	t.Run("find existing system entry", func(t *testing.T) {
+		entry, found := p.findEntry("docker.service")
+		if !found {
+			t.Error("expected to find docker.service")
+		}
+		if entry.Name != "docker.service" {
+			t.Errorf("Name = %q, want %q", entry.Name, "docker.service")
+		}
+		if entry.User != "" {
+			t.Errorf("User = %q, want empty", entry.User)
+		}
+	})
+
+	t.Run("find existing user entry", func(t *testing.T) {
+		entry, found := p.findEntry("zunesync.service")
+		if !found {
+			t.Error("expected to find zunesync.service")
+		}
+		if entry.Name != "zunesync.service" {
+			t.Errorf("Name = %q, want %q", entry.Name, "zunesync.service")
+		}
+		if entry.User != "xero" {
+			t.Errorf("User = %q, want %q", entry.User, "xero")
+		}
+		if !entry.ReadOnly {
+			t.Error("ReadOnly = false, want true")
+		}
+	})
+
+	t.Run("entry not found", func(t *testing.T) {
+		_, found := p.findEntry("nonexistent.service")
+		if found {
+			t.Error("expected not to find nonexistent.service")
+		}
+	})
+}

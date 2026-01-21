@@ -10,7 +10,9 @@
       ],
       "systemd_services": [
         "docker.service",
-        "nas-dashboard.service:ro"  // :ro suffix makes service read-only (no start/stop/restart)
+        "nas-dashboard.service:ro",  // :ro suffix makes service read-only (no start/stop/restart)
+        "username:something.service:ro",  // readonly service running as username
+        "user2:else.service#8080" // non-readonly service running as username, exposing port 8080
       ],
       "docker_compose_roots": [
         "/some/folder/"

@@ -17,6 +17,9 @@ import (
 type ServiceEntry struct {
 	// Name is the unit name (e.g., "docker.service")
 	Name string
+	// User is the username for user-level systemd services (empty for system services).
+	// When set, the service is managed via `systemctl --user` instead of system D-Bus.
+	User string
 	// ReadOnly if true, disables start/stop/restart actions for ALL users
 	ReadOnly bool
 }
@@ -55,6 +58,16 @@ func (p *Provider) Name() string {
 	return "systemd"
 }
 
+// findEntry finds a ServiceEntry by unit name, returning the entry and whether it was found.
+func (p *Provider) findEntry(unitName string) (ServiceEntry, bool) {
+	for _, entry := range p.entries {
+		if entry.Name == unitName {
+			return entry, true
+		}
+	}
+	return ServiceEntry{}, false
+}
+
 // GetServices returns all configured systemd services.
 func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, error) {
 	if p.isLocal {
@@ -65,6 +78,42 @@ func (p *Provider) GetServices(ctx context.Context) ([]services.ServiceInfo, err
 
 // getLocalServices queries systemd services on localhost via D-Bus.
 func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo, error) {
+	var result []services.ServiceInfo
+
+	// Separate system entries from user entries
+	var systemEntries, userEntries []ServiceEntry
+	for _, entry := range p.entries {
+		if entry.User != "" {
+			userEntries = append(userEntries, entry)
+		} else {
+			systemEntries = append(systemEntries, entry)
+		}
+	}
+
+	// Process system services via system D-Bus
+	if len(systemEntries) > 0 {
+		systemResults, err := p.getLocalSystemServices(ctx, systemEntries)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, systemResults...)
+	}
+
+	// Process user services via user D-Bus
+	if len(userEntries) > 0 {
+		userResults, err := p.getLocalUserServices(ctx, userEntries)
+		if err != nil {
+			// Log warning but continue - user services might fail if running as different user
+			fmt.Printf("Warning: failed to get user services: %v\n", err)
+		}
+		result = append(result, userResults...)
+	}
+
+	return result, nil
+}
+
+// getLocalSystemServices queries system-level systemd services via D-Bus.
+func (p *Provider) getLocalSystemServices(ctx context.Context, entries []ServiceEntry) ([]services.ServiceInfo, error) {
 	conn, err := dbus.NewSystemConnectionContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to systemd: %w", err)
@@ -78,7 +127,7 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 
 	// Create a map of desired unit names to their entries for quick lookup
 	desiredUnits := make(map[string]ServiceEntry)
-	for _, entry := range p.entries {
+	for _, entry := range entries {
 		desiredUnits[entry.Name] = entry
 	}
 
@@ -141,6 +190,158 @@ func (p *Provider) getLocalServices(ctx context.Context) ([]services.ServiceInfo
 	return result, nil
 }
 
+// getLocalUserServices queries user-level systemd services.
+// Uses user D-Bus connection when possible, falls back to systemctl --user command.
+func (p *Provider) getLocalUserServices(ctx context.Context, entries []ServiceEntry) ([]services.ServiceInfo, error) {
+	var result []services.ServiceInfo
+
+	// Group entries by user
+	userGroups := make(map[string][]ServiceEntry)
+	for _, entry := range entries {
+		userGroups[entry.User] = append(userGroups[entry.User], entry)
+	}
+
+	// Process each user's services
+	for user, userEntries := range userGroups {
+		// Try to connect to user's D-Bus session
+		conn, err := dbus.NewUserConnectionContext(ctx)
+		if err == nil {
+			// We have a user D-Bus connection (likely running as this user)
+			defer conn.Close()
+			for _, entry := range userEntries {
+				info, err := p.getUserUnitInfo(ctx, conn, entry, user)
+				if err != nil {
+					result = append(result, services.ServiceInfo{
+						Name:          entry.Name,
+						Project:       "systemd-user",
+						ContainerName: fmt.Sprintf("%s@%s", user, entry.Name),
+						State:         "stopped",
+						Status:        "not found",
+						Image:         "-",
+						Source:        "systemd",
+						Host:          p.hostName,
+						ReadOnly:      entry.ReadOnly,
+					})
+					continue
+				}
+				result = append(result, info)
+			}
+		} else {
+			// Fall back to systemctl --user command via exec
+			for _, entry := range userEntries {
+				info, err := p.getUserUnitInfoViaExec(ctx, entry, user)
+				if err != nil {
+					result = append(result, services.ServiceInfo{
+						Name:          entry.Name,
+						Project:       "systemd-user",
+						ContainerName: fmt.Sprintf("%s@%s", user, entry.Name),
+						State:         "stopped",
+						Status:        "error: " + err.Error(),
+						Image:         "-",
+						Source:        "systemd",
+						Host:          p.hostName,
+						ReadOnly:      entry.ReadOnly,
+					})
+					continue
+				}
+				result = append(result, info)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// getUserUnitInfo gets info for a user service via D-Bus connection.
+func (p *Provider) getUserUnitInfo(ctx context.Context, conn *dbus.Conn, entry ServiceEntry, user string) (services.ServiceInfo, error) {
+	prop, err := conn.GetUnitPropertyContext(ctx, entry.Name, "ActiveState")
+	if err != nil {
+		return services.ServiceInfo{}, err
+	}
+
+	activeState := strings.Trim(prop.Value.String(), "\"")
+	state := "stopped"
+	if activeState == "active" {
+		state = "running"
+	}
+
+	subProp, _ := conn.GetUnitPropertyContext(ctx, entry.Name, "SubState")
+	subState := "unknown"
+	if subProp != nil {
+		subState = strings.Trim(subProp.Value.String(), "\"")
+	}
+
+	// Get unit description
+	description := ""
+	descProp, _ := conn.GetUnitPropertyContext(ctx, entry.Name, "Description")
+	if descProp != nil {
+		description = strings.Trim(descProp.Value.String(), "\"")
+	}
+
+	return services.ServiceInfo{
+		Name:          entry.Name,
+		Project:       "systemd-user",
+		ContainerName: fmt.Sprintf("%s@%s", user, entry.Name),
+		State:         state,
+		Status:        fmt.Sprintf("%s (%s)", activeState, subState),
+		Image:         "-",
+		Source:        "systemd",
+		Host:          p.hostName,
+		Description:   description,
+		ReadOnly:      entry.ReadOnly,
+	}, nil
+}
+
+// getUserUnitInfoViaExec gets user service info by running systemctl --user command.
+// This is used when D-Bus connection fails (e.g., running as different user).
+func (p *Provider) getUserUnitInfoViaExec(ctx context.Context, entry ServiceEntry, user string) (services.ServiceInfo, error) {
+	// Run systemctl --user show as the target user
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "--machine="+user+"@", "show",
+		entry.Name, "--property=ActiveState,SubState,LoadState,Description")
+
+	output, err := cmd.Output()
+	if err != nil {
+		return services.ServiceInfo{}, fmt.Errorf("systemctl --user failed: %w", err)
+	}
+
+	// Parse the output
+	props := make(map[string]string)
+	for _, line := range strings.Split(string(output), "\n") {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			props[parts[0]] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	activeState := props["ActiveState"]
+	subState := props["SubState"]
+	loadState := props["LoadState"]
+	description := props["Description"]
+
+	state := "stopped"
+	if activeState == "active" {
+		state = "running"
+	}
+
+	status := fmt.Sprintf("%s (%s)", activeState, subState)
+	if loadState == "not-found" {
+		status = "not found"
+	}
+
+	return services.ServiceInfo{
+		Name:          entry.Name,
+		Project:       "systemd-user",
+		ContainerName: fmt.Sprintf("%s@%s", user, entry.Name),
+		State:         state,
+		Status:        status,
+		Image:         "-",
+		Source:        "systemd",
+		Host:          p.hostName,
+		Description:   description,
+		ReadOnly:      entry.ReadOnly,
+	}, nil
+}
+
 // getLocalUnitInfo gets info for a single unit via D-Bus.
 func (p *Provider) getLocalUnitInfo(ctx context.Context, conn *dbus.Conn, unitName string) (services.ServiceInfo, error) {
 	prop, err := conn.GetUnitPropertyContext(ctx, unitName, "ActiveState")
@@ -190,12 +391,28 @@ func (p *Provider) getRemoteServices(ctx context.Context) ([]services.ServiceInf
 	var result []services.ServiceInfo
 
 	for _, entry := range p.entries {
-		info, err := p.getRemoteUnitInfo(ctx, entry.Name)
+		var info services.ServiceInfo
+		var err error
+
+		if entry.User != "" {
+			// User service: use systemctl --user via SSH
+			info, err = p.getRemoteUserUnitInfo(ctx, entry)
+		} else {
+			// System service: use systemctl via SSH
+			info, err = p.getRemoteUnitInfo(ctx, entry.Name)
+		}
+
 		if err != nil {
+			project := "systemd"
+			containerName := entry.Name
+			if entry.User != "" {
+				project = "systemd-user"
+				containerName = fmt.Sprintf("%s@%s", entry.User, entry.Name)
+			}
 			result = append(result, services.ServiceInfo{
 				Name:          entry.Name,
-				Project:       "systemd",
-				ContainerName: entry.Name,
+				Project:       project,
+				ContainerName: containerName,
 				State:         "stopped",
 				Status:        "unreachable",
 				Image:         "-",
@@ -210,6 +427,59 @@ func (p *Provider) getRemoteServices(ctx context.Context) ([]services.ServiceInf
 	}
 
 	return result, nil
+}
+
+// getRemoteUserUnitInfo gets info for a user service via SSH.
+func (p *Provider) getRemoteUserUnitInfo(ctx context.Context, entry ServiceEntry) (services.ServiceInfo, error) {
+	// For user services, we need to run systemctl --user as the specified user
+	// Using sudo -u <user> with XDG_RUNTIME_DIR set
+	shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) systemctl --user show %s --property=ActiveState,SubState,LoadState,Description",
+		entry.User, entry.User, entry.Name)
+
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+		p.address, "bash", "-c", shellCmd)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return services.ServiceInfo{}, fmt.Errorf("SSH failed: %w", err)
+	}
+
+	// Parse the output
+	props := make(map[string]string)
+	for _, line := range strings.Split(string(output), "\n") {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			props[parts[0]] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	activeState := props["ActiveState"]
+	subState := props["SubState"]
+	loadState := props["LoadState"]
+	description := props["Description"]
+
+	state := "stopped"
+	if activeState == "active" {
+		state = "running"
+	}
+
+	status := fmt.Sprintf("%s (%s)", activeState, subState)
+	if loadState == "not-found" {
+		status = "not found"
+	}
+
+	return services.ServiceInfo{
+		Name:          entry.Name,
+		Project:       "systemd-user",
+		ContainerName: fmt.Sprintf("%s@%s", entry.User, entry.Name),
+		State:         state,
+		Status:        status,
+		Image:         "-",
+		Source:        "systemd",
+		Host:          p.hostName,
+		Description:   description,
+		ReadOnly:      entry.ReadOnly,
+	}, nil
 }
 
 // getRemoteUnitInfo gets info for a single unit via SSH.
@@ -261,21 +531,25 @@ func (p *Provider) getRemoteUnitInfo(ctx context.Context, unitName string) (serv
 
 // GetService returns a specific systemd service by unit name.
 func (p *Provider) GetService(name string) (services.Service, error) {
+	entry, _ := p.findEntry(name)
 	return &SystemdService{
 		unitName: name,
 		hostName: p.hostName,
 		address:  p.address,
 		isLocal:  p.isLocal,
+		user:     entry.User,
 	}, nil
 }
 
 // GetLogs streams logs for a specific unit.
 func (p *Provider) GetLogs(ctx context.Context, unitName string, tailLines int, follow bool) (io.ReadCloser, error) {
+	entry, _ := p.findEntry(unitName)
 	svc := &SystemdService{
 		unitName: unitName,
 		hostName: p.hostName,
 		address:  p.address,
 		isLocal:  p.isLocal,
+		user:     entry.User,
 	}
 	return svc.GetLogs(ctx, tailLines, follow)
 }
@@ -286,11 +560,17 @@ type SystemdService struct {
 	hostName string
 	address  string
 	isLocal  bool
+	user     string // User for user-level services (empty for system services)
 }
 
 // GetInfo returns the current status of the unit.
 func (s *SystemdService) GetInfo(ctx context.Context) (services.ServiceInfo, error) {
 	if s.isLocal {
+		// For user services, use user D-Bus or exec
+		if s.user != "" {
+			return s.getLocalUserInfo(ctx)
+		}
+		// System service uses system D-Bus
 		conn, err := dbus.NewSystemConnectionContext(ctx)
 		if err != nil {
 			return services.ServiceInfo{}, fmt.Errorf("failed to connect to systemd: %w", err)
@@ -334,26 +614,134 @@ func (s *SystemdService) GetInfo(ctx context.Context) (services.ServiceInfo, err
 		}, nil
 	}
 
-	// Remote
+	// Remote - use the entry to determine if it's a user service
+	if s.user != "" {
+		provider := &Provider{address: s.address, hostName: s.hostName}
+		return provider.getRemoteUserUnitInfo(ctx, ServiceEntry{Name: s.unitName, User: s.user})
+	}
 	provider := &Provider{address: s.address, hostName: s.hostName}
 	return provider.getRemoteUnitInfo(ctx, s.unitName)
+}
+
+// getLocalUserInfo gets info for a local user service.
+func (s *SystemdService) getLocalUserInfo(ctx context.Context) (services.ServiceInfo, error) {
+	// Try user D-Bus connection first
+	conn, err := dbus.NewUserConnectionContext(ctx)
+	if err == nil {
+		defer conn.Close()
+
+		prop, err := conn.GetUnitPropertyContext(ctx, s.unitName, "ActiveState")
+		if err != nil {
+			return services.ServiceInfo{}, err
+		}
+
+		activeState := strings.Trim(prop.Value.String(), "\"")
+		state := "stopped"
+		if activeState == "active" {
+			state = "running"
+		}
+
+		subProp, _ := conn.GetUnitPropertyContext(ctx, s.unitName, "SubState")
+		subState := "unknown"
+		if subProp != nil {
+			subState = strings.Trim(subProp.Value.String(), "\"")
+		}
+
+		description := ""
+		descProp, _ := conn.GetUnitPropertyContext(ctx, s.unitName, "Description")
+		if descProp != nil {
+			description = strings.Trim(descProp.Value.String(), "\"")
+		}
+
+		return services.ServiceInfo{
+			Name:          s.unitName,
+			Project:       "systemd-user",
+			ContainerName: fmt.Sprintf("%s@%s", s.user, s.unitName),
+			State:         state,
+			Status:        fmt.Sprintf("%s (%s)", activeState, subState),
+			Image:         "-",
+			Source:        "systemd",
+			Host:          s.hostName,
+			Description:   description,
+		}, nil
+	}
+
+	// Fall back to exec with --machine option
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "--machine="+s.user+"@", "show",
+		s.unitName, "--property=ActiveState,SubState,LoadState,Description")
+
+	output, err := cmd.Output()
+	if err != nil {
+		return services.ServiceInfo{}, fmt.Errorf("systemctl --user failed: %w", err)
+	}
+
+	props := make(map[string]string)
+	for _, line := range strings.Split(string(output), "\n") {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			props[parts[0]] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	activeState := props["ActiveState"]
+	subState := props["SubState"]
+	loadState := props["LoadState"]
+	description := props["Description"]
+
+	state := "stopped"
+	if activeState == "active" {
+		state = "running"
+	}
+
+	status := fmt.Sprintf("%s (%s)", activeState, subState)
+	if loadState == "not-found" {
+		status = "not found"
+	}
+
+	return services.ServiceInfo{
+		Name:          s.unitName,
+		Project:       "systemd-user",
+		ContainerName: fmt.Sprintf("%s@%s", s.user, s.unitName),
+		State:         state,
+		Status:        status,
+		Image:         "-",
+		Source:        "systemd",
+		Host:          s.hostName,
+		Description:   description,
+	}, nil
 }
 
 // GetLogs returns a stream of logs for the unit.
 func (s *SystemdService) GetLogs(ctx context.Context, tailLines int, follow bool) (io.ReadCloser, error) {
 	var cmd *exec.Cmd
 
+	// Build base args for journalctl
 	args := []string{"-u", s.unitName, "-n", fmt.Sprintf("%d", tailLines), "--no-pager", "-o", "short-iso"}
 	if follow {
 		args = append(args, "-f")
 	}
 
 	if s.isLocal {
+		if s.user != "" {
+			// For local user services, just use --user flag
+			// This works when the dashboard runs as the same user
+			args = append([]string{"--user"}, args...)
+		}
 		cmd = exec.CommandContext(ctx, "journalctl", args...)
 	} else {
-		sshArgs := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", s.address, "journalctl"}
-		sshArgs = append(sshArgs, args...)
-		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
+		if s.user != "" {
+			// For remote user services, run as that user via sudo
+			// Add --user flag to the args
+			userArgs := append([]string{"--user"}, args...)
+			shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) journalctl %s",
+				s.user, s.user, strings.Join(userArgs, " "))
+			cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+				s.address, "bash", "-c", shellCmd)
+		} else {
+			sshArgs := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", s.address, "journalctl"}
+			sshArgs = append(sshArgs, args...)
+			cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
+		}
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -398,8 +786,15 @@ func (s *SystemdService) runSystemctl(ctx context.Context, action string) error 
 
 // runLocalSystemctl uses D-Bus to control a local systemd unit.
 // This avoids the NoNewPrivileges restriction when using sudo.
-// Authorization is handled by polkit rules.
+// Authorization is handled by polkit rules for system services.
+// For user services, uses user D-Bus connection or systemctl --user command.
 func (s *SystemdService) runLocalSystemctl(ctx context.Context, action string) error {
+	// For user services, use user D-Bus or systemctl --user
+	if s.user != "" {
+		return s.runLocalUserSystemctl(ctx, action)
+	}
+
+	// System service uses system D-Bus
 	conn, err := dbus.NewSystemConnectionContext(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to systemd: %w", err)
@@ -437,11 +832,73 @@ func (s *SystemdService) runLocalSystemctl(ctx context.Context, action string) e
 	return nil
 }
 
+// runLocalUserSystemctl controls a local user service.
+// Uses user D-Bus if available, otherwise falls back to systemctl --user command.
+func (s *SystemdService) runLocalUserSystemctl(ctx context.Context, action string) error {
+	// Try user D-Bus connection first
+	conn, err := dbus.NewUserConnectionContext(ctx)
+	if err == nil {
+		defer conn.Close()
+
+		resultChan := make(chan string, 1)
+
+		switch action {
+		case "start":
+			_, err = conn.StartUnitContext(ctx, s.unitName, "replace", resultChan)
+		case "stop":
+			_, err = conn.StopUnitContext(ctx, s.unitName, "replace", resultChan)
+		case "restart":
+			_, err = conn.RestartUnitContext(ctx, s.unitName, "replace", resultChan)
+		default:
+			return fmt.Errorf("unknown action: %s", action)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to %s user unit: %w", action, err)
+		}
+
+		select {
+		case result := <-resultChan:
+			if result != "done" && result != "skipped" {
+				return fmt.Errorf("job failed with result: %s", result)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		return nil
+	}
+
+	// Fall back to systemctl --user with --machine option
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "--machine="+s.user+"@", action, s.unitName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
+		if outputStr != "" {
+			return fmt.Errorf("%w: %s", err, outputStr)
+		}
+		return err
+	}
+	return nil
+}
+
 // runRemoteSystemctl uses SSH with sudo to control a remote systemd unit.
 // Requires sudoers configuration on the remote host.
+// For user services, runs systemctl --user as the specified user.
 func (s *SystemdService) runRemoteSystemctl(ctx context.Context, action string) error {
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
-		s.address, "sudo", "systemctl", action, s.unitName)
+	var cmd *exec.Cmd
+
+	if s.user != "" {
+		// For user services, run systemctl --user as the specified user via sudo
+		shellCmd := fmt.Sprintf("sudo -u %s XDG_RUNTIME_DIR=/run/user/$(id -u %s) systemctl --user %s %s",
+			s.user, s.user, action, s.unitName)
+		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+			s.address, "bash", "-c", shellCmd)
+	} else {
+		// System service uses sudo systemctl
+		cmd = exec.CommandContext(ctx, "ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+			s.address, "sudo", "systemctl", action, s.unitName)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

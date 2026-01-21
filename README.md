@@ -43,7 +43,11 @@ cp sample.services.json services.json
     {
       "name": "myserver",
       "address": "localhost",
-      "systemd_services": ["docker.service", "nginx.service"],
+      "systemd_services": [
+        "docker.service",
+        "nginx.service",
+        "myuser:myapp.service"
+      ],
       "docker_compose_roots": ["/path/to/your/compose/projects/"]
     }
   ]
@@ -413,6 +417,45 @@ To mark a service as read-only, append `:ro` to the service name in your configu
 - Useful for monitoring the dashboard's own systemd service to prevent accidental self-termination
 
 **Example use case:** Marking `nas-dashboard.service:ro` prevents users from stopping or restarting the dashboard through the web interface, which would cause the dashboard to become unavailable.
+
+#### User Systemd Services
+
+User-level systemd services (those in `~/.config/systemd/user/`) can be monitored using the `username:servicename.service` notation:
+
+```json
+{
+  "hosts": [
+    {
+      "name": "myserver",
+      "address": "localhost",
+      "systemd_services": [
+        "docker.service",
+        "xero:zunesync.service",
+        "alice:backup.timer:ro"
+      ]
+    }
+  ]
+}
+```
+
+**Supported formats:**
+| Format | Description |
+|--------|-------------|
+| `servicename.service` | System service |
+| `servicename.service:ro` | System service, read-only |
+| `username:servicename.service` | User service for specified user |
+| `username:servicename.service:ro` | User service, read-only |
+
+**Behavior:**
+- User services are managed via `systemctl --user` instead of system D-Bus
+- They display with project name `systemd-user` to distinguish from system services
+- Container name shows as `username@servicename.service` for clarity
+- Supports the same `:ro` suffix for read-only mode
+
+**Requirements:**
+- For local user services: The dashboard must run as the target user, or have permissions to use `machinectl`
+- For remote user services: SSH user must have sudo access to run `systemctl --user` as the target user
+- User services require lingering enabled: `sudo loginctl enable-linger username`
 
 ## Web Interface
 

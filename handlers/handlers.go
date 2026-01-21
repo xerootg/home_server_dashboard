@@ -81,6 +81,7 @@ func getAllServices(ctx context.Context, cfg *config.Config) ([]services.Service
 		for _, entry := range configEntries {
 			systemdEntries = append(systemdEntries, systemd.ServiceEntry{
 				Name:     entry.Name,
+				User:     entry.User,
 				ReadOnly: entry.ReadOnly,
 			})
 		}
@@ -420,13 +421,29 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the host config to get the address
+	// Find the host config to get the address and service entry
 	cfg := config.Get()
 	hostAddress := "localhost"
+	var serviceEntry systemd.ServiceEntry
 	if cfg != nil {
 		if host := cfg.GetHostByName(hostName); host != nil {
 			hostAddress = host.Address
+			// Look up the service entry to get user information
+			for _, entry := range host.GetSystemdServiceEntries() {
+				if entry.Name == unitName {
+					serviceEntry = systemd.ServiceEntry{
+						Name:     entry.Name,
+						User:     entry.User,
+						ReadOnly: entry.ReadOnly,
+					}
+					break
+				}
+			}
 		}
+	}
+	// If not found in config, create a basic entry
+	if serviceEntry.Name == "" {
+		serviceEntry = systemd.ServiceEntry{Name: unitName}
 	}
 
 	// Set headers for SSE
@@ -443,8 +460,8 @@ func SystemdLogsHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Create systemd provider for this host
-	systemdProvider := systemd.NewProvider(hostName, hostAddress, []string{unitName})
+	// Create systemd provider for this host with the full service entry
+	systemdProvider := systemd.NewProviderWithEntries(hostName, hostAddress, []systemd.ServiceEntry{serviceEntry})
 	logs, err := systemdProvider.GetLogs(ctx, unitName, 100, true)
 	if err != nil {
 		fmt.Fprintf(w, "data: Error starting journalctl: %v\n\n", err)

@@ -100,15 +100,25 @@ type HostConfig struct {
 type SystemdServiceEntry struct {
 	// Name is the unit name (e.g., "docker.service")
 	Name string
+	// User is the username for user-level systemd services (empty for system services)
+	// When set, the service is managed via `systemctl --user` instead of system D-Bus.
+	User string
 	// ReadOnly if true, disables start/stop/restart actions for ALL users
 	ReadOnly bool
 }
 
 // GetSystemdServiceEntries parses the SystemdServices list and returns entries with flags.
-// Service names can have suffixes:
-//   - ":ro" - marks the service as read-only (no start/stop/restart for any user)
+// Service names support the following formats:
+//   - "servicename.service" - system service
+//   - "servicename.service:ro" - system service, read-only
+//   - "username:servicename.service" - user service (managed via systemctl --user)
+//   - "username:servicename.service:ro" - user service, read-only
 //
-// Example: "nas-dashboard.service:ro" returns {Name: "nas-dashboard.service", ReadOnly: true}
+// Examples:
+//   - "docker.service" returns {Name: "docker.service", User: "", ReadOnly: false}
+//   - "nas-dashboard.service:ro" returns {Name: "nas-dashboard.service", User: "", ReadOnly: true}
+//   - "xero:zunesync.service" returns {Name: "zunesync.service", User: "xero", ReadOnly: false}
+//   - "xero:zunesync.service:ro" returns {Name: "zunesync.service", User: "xero", ReadOnly: true}
 func (h *HostConfig) GetSystemdServiceEntries() []SystemdServiceEntry {
 	entries := make([]SystemdServiceEntry, 0, len(h.SystemdServices))
 	for _, svc := range h.SystemdServices {
@@ -130,19 +140,39 @@ func (h *HostConfig) GetSystemdServiceNames() []string {
 }
 
 // ParseSystemdServiceEntry parses a service entry string into a SystemdServiceEntry.
-// Recognizes the ":ro" suffix for read-only services.
+// Recognizes the following formats:
+//   - "servicename.service" - system service
+//   - "servicename.service:ro" - system service, read-only
+//   - "username:servicename.service" - user service
+//   - "username:servicename.service:ro" - user service, read-only
+//
+// The parser first strips any ":ro" suffix, then checks for a "username:" prefix.
+// A username prefix is identified by finding a colon before a dot (systemd units always
+// have an extension like .service, .timer, .socket, etc.).
 func ParseSystemdServiceEntry(entry string) SystemdServiceEntry {
 	result := SystemdServiceEntry{}
-	
-	// Check for :ro suffix
+
+	// Check for :ro suffix first
 	if strings.HasSuffix(entry, ":ro") {
-		result.Name = strings.TrimSuffix(entry, ":ro")
+		entry = strings.TrimSuffix(entry, ":ro")
 		result.ReadOnly = true
-	} else {
-		result.Name = entry
-		result.ReadOnly = false
 	}
-	
+
+	// Check for username:servicename format
+	// A username prefix exists if there's a colon before any dot
+	// (since systemd unit names must have an extension like .service)
+	colonIdx := strings.Index(entry, ":")
+	dotIdx := strings.Index(entry, ".")
+
+	if colonIdx > 0 && dotIdx > colonIdx {
+		// Format is "username:servicename.unit"
+		result.User = entry[:colonIdx]
+		result.Name = entry[colonIdx+1:]
+	} else {
+		// No user prefix, just the service name
+		result.Name = entry
+	}
+
 	return result
 }
 

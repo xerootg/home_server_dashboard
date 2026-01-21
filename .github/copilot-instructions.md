@@ -442,7 +442,12 @@ Defines which hosts and services to monitor. Supports JSON with comments (`//`, 
       "name": "nas",                    // Display name
       "address": "localhost",           // "localhost" uses D-Bus, others use SSH
       "nic": ["ens10"],                 // NIC names to resolve private IP for port links
-      "systemd_services": ["docker.service", "nas-dashboard.service:ro"],  // :ro = read-only (no start/stop/restart)
+      "systemd_services": [             // System and user services to monitor
+        "docker.service",               // System service (managed via systemctl)
+        "nas-dashboard.service:ro",     // :ro = read-only (no start/stop/restart)
+        "xero:zunesync.service",        // User service (username:servicename.service)
+        "alice:backup.timer:ro"         // User service, read-only
+      ],
       "docker_compose_roots": ["/home/xero/nas/"],
       "watchtower": {                   // Optional: Watchtower integration
         "port": 8080,                   // Watchtower HTTP API port (default 8080)
@@ -585,6 +590,36 @@ Systemd services can be marked as read-only by appending `:ro` to the service na
 ```
 
 **Use case:** When monitoring the dashboard's own systemd service, stopping or restarting it through the dashboard would be problematic. Marking it as `:ro` prevents accidental self-termination.
+
+### User Systemd Services
+
+User-level systemd services (those in `~/.config/systemd/user/`) can be monitored using the `username:servicename.service` notation. User services:
+- Are managed via `systemctl --user` instead of the system D-Bus
+- Support the same `:ro` suffix for read-only mode
+- Display with the project name `systemd-user` to distinguish from system services
+- Show `username@servicename.service` as the container name for clarity
+
+**Supported formats:**
+```json
+"systemd_services": [
+  "docker.service",               // System service
+  "docker.service:ro",            // System service, read-only
+  "xero:zunesync.service",        // User service for user 'xero'
+  "xero:zunesync.service:ro",     // User service, read-only
+  "alice:backup.timer",           // User timer unit
+  "bob:cleanup.timer:ro"          // User timer, read-only
+]
+```
+
+**How it works:**
+- **Local hosts (localhost/127.0.0.1):** Uses user D-Bus connection when the dashboard runs as the same user, or falls back to `systemctl --user --machine=username@` for other users
+- **Remote hosts:** Uses SSH with `sudo -u username systemctl --user` to query/control the user's services
+- **Logs:** Uses `journalctl --user` to stream user service logs
+
+**Requirements:**
+- For local user services: The dashboard must either run as the target user, or have permissions to use `machinectl` to access other users' sessions
+- For remote user services: The SSH user must have sudo access to run `systemctl --user` as the target user
+- User services require `lingering` enabled for the user to run without an active login session: `sudo loginctl enable-linger username`
 
 ### OIDC Group-Based Access Control
 
