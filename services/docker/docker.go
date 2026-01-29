@@ -188,6 +188,7 @@ func extractExposedPorts(ports []container.Port, labels map[string]string) []ser
 		// Get port-specific label and hidden status
 		portLabel := getPortLabel(labels, port.PublicPort)
 		portHidden := hiddenPorts[port.PublicPort] || isPortHiddenByLabel(labels, port.PublicPort)
+		portURLProtocol := getPortURLProtocol(labels, port.PublicPort)
 
 		// Include ports bound to 0.0.0.0, empty (all interfaces), or specific non-localhost IPs
 		result = append(result, services.PortInfo{
@@ -196,6 +197,7 @@ func extractExposedPorts(ports []container.Port, labels map[string]string) []ser
 			Protocol:      port.Type,
 			Label:         portLabel,
 			Hidden:        portHidden,
+			URLProtocol:   portURLProtocol,
 		})
 	}
 	return result
@@ -236,6 +238,18 @@ func getPortLabel(labels map[string]string, port uint16) string {
 func isPortHiddenByLabel(labels map[string]string, port uint16) bool {
 	key := fmt.Sprintf("%s.%d.hidden", LabelPortsPrefix, port)
 	return isLabelTrue(labels[key])
+}
+
+// getPortURLProtocol retrieves the URL protocol override for a specific port from Docker labels.
+// Looks for: home.server.dashboard.ports.<port>.protocol
+// Returns "http" or "https" if specified, empty string otherwise.
+func getPortURLProtocol(labels map[string]string, port uint16) string {
+	key := fmt.Sprintf("%s.%d.protocol", LabelPortsPrefix, port)
+	proto := strings.ToLower(strings.TrimSpace(labels[key]))
+	if proto == "http" || proto == "https" {
+		return proto
+	}
+	return ""
 }
 
 // PortRemap represents a port that should be remapped from one service to another.
@@ -436,6 +450,7 @@ func extractPortsFromInspect(settings *container.NetworkSettings, labels map[str
 			// Get port-specific label and hidden status
 			portLabel := getPortLabel(labels, hostPort)
 			portHidden := hiddenPorts[hostPort] || isPortHiddenByLabel(labels, hostPort)
+			portURLProtocol := getPortURLProtocol(labels, hostPort)
 
 			result = append(result, services.PortInfo{
 				HostPort:      hostPort,
@@ -443,6 +458,7 @@ func extractPortsFromInspect(settings *container.NetworkSettings, labels map[str
 				Protocol:      portProto.Proto(),
 				Label:         portLabel,
 				Hidden:        portHidden,
+				URLProtocol:   portURLProtocol,
 			})
 		}
 	}

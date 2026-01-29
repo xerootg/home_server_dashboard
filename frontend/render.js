@@ -57,9 +57,11 @@ export function renderPorts(ports, hostIP, currentService) {
             let displayText;
             let titleText;
             let badgeClass = 'port-link badge bg-info text-dark me-1';
+            // Use custom protocol if specified, otherwise default to http
+            const urlProtocol = port.url_protocol || 'http';
             
             if (port.label) {
-                const url = `http://${targetHost}:${port.host_port}`;
+                const url = `${urlProtocol}://${targetHost}:${port.host_port}`;
                 displayText = escapeHtml(port.label);
                 titleText = `${escapeHtml(port.label)} - Port ${port.host_port} (${port.protocol})`;
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
@@ -70,12 +72,12 @@ export function renderPorts(ports, hostIP, currentService) {
                 return `<span class="${badgeClass}" onclick="event.stopPropagation(); window.__dashboard.scrollToService('${escapeHtml(port.target_service)}', '${escapeHtml(currentHost)}');" title="${titleText}" style="cursor: pointer;">${displayText}</span>`;
             } else if (port.source_service) {
                 const sourceIP = getServiceHostIP(port.source_service, currentHost) || targetHost;
-                const url = `http://${sourceIP}:${port.host_port}`;
+                const url = `${urlProtocol}://${sourceIP}:${port.host_port}`;
                 displayText = `${escapeHtml(port.source_service)}:${port.host_port}`;
                 titleText = `Open port ${port.host_port} on ${escapeHtml(port.source_service)} (${port.protocol})`;
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;
             } else {
-                const url = `http://${targetHost}:${port.host_port}`;
+                const url = `${urlProtocol}://${targetHost}:${port.host_port}`;
                 displayText = `:${port.host_port}`;
                 titleText = `Open port ${port.host_port} (${port.protocol})`;
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${badgeClass}" onclick="event.stopPropagation();" title="${titleText}">${displayText}</a>`;

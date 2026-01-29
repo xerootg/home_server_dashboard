@@ -13,6 +13,7 @@ type PortInfo struct {
 	Protocol      string `json:"protocol"`                  // "tcp" or "udp"
 	Label         string `json:"label,omitempty"`           // Custom label for display (from Docker label)
 	Hidden        bool   `json:"hidden,omitempty"`          // If true, port should be hidden from UI
+	URLProtocol   string `json:"url_protocol,omitempty"`    // URL protocol override ("http" or "https", from Docker label)
 	SourceService string `json:"source_service,omitempty"`  // Service that exposes this port (for remapped ports on target)
 	TargetService string `json:"target_service,omitempty"`  // Service this port is remapped to (for remapped ports on source)
 }

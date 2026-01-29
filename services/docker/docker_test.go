@@ -904,3 +904,153 @@ func TestExtractTraefikServiceName(t *testing.T) {
 		})
 	}
 }
+
+// TestGetPortURLProtocol tests the getPortURLProtocol helper function.
+func TestGetPortURLProtocol(t *testing.T) {
+	labels := map[string]string{
+		"home.server.dashboard.ports.8080.protocol": "https",
+		"home.server.dashboard.ports.443.protocol":  "https",
+		"home.server.dashboard.ports.80.protocol":   "http",
+		"home.server.dashboard.ports.9000.protocol": "HTTPS",  // Should normalize to lowercase
+		"home.server.dashboard.ports.3000.protocol": "invalid", // Should return empty
+		"home.server.dashboard.ports.4000.protocol": "",        // Should return empty
+	}
+
+	tests := []struct {
+		name     string
+		port     uint16
+		expected string
+	}{
+		{"explicit https", 8080, "https"},
+		{"explicit https on 443", 443, "https"},
+		{"explicit http", 80, "http"},
+		{"uppercase HTTPS normalized", 9000, "https"},
+		{"invalid protocol ignored", 3000, ""},
+		{"empty protocol ignored", 4000, ""},
+		{"port not in labels", 5000, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getPortURLProtocol(labels, tt.port)
+			if result != tt.expected {
+				t.Errorf("getPortURLProtocol(labels, %d) = %q, want %q", tt.port, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestExtractExposedPortsWithProtocolOverride tests extractExposedPorts with protocol labels.
+func TestExtractExposedPortsWithProtocolOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		ports    []container.Port
+		labels   map[string]string
+		expected []services.PortInfo
+	}{
+		{
+			name: "port with https protocol override",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8443.protocol": "https",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", URLProtocol: "https"},
+			},
+		},
+		{
+			name: "port with http protocol override",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8080.protocol": "http",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", URLProtocol: "http"},
+			},
+		},
+		{
+			name: "port without protocol override",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: map[string]string{},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", URLProtocol: ""},
+			},
+		},
+		{
+			name: "multiple ports with mixed protocol overrides",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+				{IP: "0.0.0.0", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+				{IP: "0.0.0.0", PrivatePort: 3000, PublicPort: 3000, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8443.protocol": "https",
+				"home.server.dashboard.ports.3000.protocol": "https",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", URLProtocol: ""},
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", URLProtocol: "https"},
+				{HostPort: 3000, ContainerPort: 3000, Protocol: "tcp", URLProtocol: "https"},
+			},
+		},
+		{
+			name: "protocol override with label and hidden",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 443, PublicPort: 8443, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8443.label":    "Admin Panel",
+				"home.server.dashboard.ports.8443.protocol": "https",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", Label: "Admin Panel", URLProtocol: "https"},
+			},
+		},
+		{
+			name: "invalid protocol ignored",
+			ports: []container.Port{
+				{IP: "0.0.0.0", PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+			},
+			labels: map[string]string{
+				"home.server.dashboard.ports.8080.protocol": "ftp",
+			},
+			expected: []services.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", URLProtocol: ""},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractExposedPorts(tt.ports, tt.labels)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("extractExposedPorts() returned %d ports, want %d", len(result), len(tt.expected))
+			}
+
+			for i, port := range result {
+				if port.HostPort != tt.expected[i].HostPort {
+					t.Errorf("port[%d].HostPort = %v, want %v", i, port.HostPort, tt.expected[i].HostPort)
+				}
+				if port.ContainerPort != tt.expected[i].ContainerPort {
+					t.Errorf("port[%d].ContainerPort = %v, want %v", i, port.ContainerPort, tt.expected[i].ContainerPort)
+				}
+				if port.Protocol != tt.expected[i].Protocol {
+					t.Errorf("port[%d].Protocol = %v, want %v", i, port.Protocol, tt.expected[i].Protocol)
+				}
+				if port.Label != tt.expected[i].Label {
+					t.Errorf("port[%d].Label = %q, want %q", i, port.Label, tt.expected[i].Label)
+				}
+				if port.URLProtocol != tt.expected[i].URLProtocol {
+					t.Errorf("port[%d].URLProtocol = %q, want %q", i, port.URLProtocol, tt.expected[i].URLProtocol)
+				}
+			}
+		})
+	}
+}

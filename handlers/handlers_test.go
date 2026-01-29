@@ -947,6 +947,91 @@ func TestApplyPortRemaps_MultipleRemaps(t *testing.T) {
 	}
 }
 
+// TestApplyPortRemaps_WithProtocolOverride tests that URLProtocol is preserved during remapping.
+func TestApplyPortRemaps_WithProtocolOverride(t *testing.T) {
+	svcList := []services.ServiceInfo{
+		{
+			Name:   "gluetun",
+			Source: "docker",
+			Ports: []services.PortInfo{
+				{HostPort: 8443, ContainerPort: 8443, Protocol: "tcp", URLProtocol: "https"},
+				{HostPort: 8080, ContainerPort: 8080, Protocol: "tcp", URLProtocol: "http", Label: "Admin"},
+			},
+		},
+		{
+			Name:   "qbittorrent",
+			Source: "docker",
+			Ports:  []services.PortInfo{},
+		},
+	}
+
+	remaps := []docker.PortRemap{
+		{Port: 8443, TargetService: "qbittorrent", SourceService: "gluetun"},
+		{Port: 8080, TargetService: "qbittorrent", SourceService: "gluetun"},
+	}
+
+	result := applyPortRemaps(svcList, remaps)
+
+	// Build a map for easier checking
+	svcMap := make(map[string]*services.ServiceInfo)
+	for i := range result {
+		svcMap[result[i].Name] = &result[i]
+	}
+
+	// Check qbittorrent received both ports with their protocol overrides
+	qbittorrent := svcMap["qbittorrent"]
+	if len(qbittorrent.Ports) != 2 {
+		t.Fatalf("qbittorrent should have 2 ports, got %d", len(qbittorrent.Ports))
+	}
+
+	// Find the https port
+	var httpsPort *services.PortInfo
+	var httpPort *services.PortInfo
+	for i := range qbittorrent.Ports {
+		if qbittorrent.Ports[i].HostPort == 8443 {
+			httpsPort = &qbittorrent.Ports[i]
+		}
+		if qbittorrent.Ports[i].HostPort == 8080 {
+			httpPort = &qbittorrent.Ports[i]
+		}
+	}
+
+	if httpsPort == nil {
+		t.Fatal("qbittorrent should have port 8443")
+	}
+	if httpsPort.URLProtocol != "https" {
+		t.Errorf("port 8443 URLProtocol = %q, want https", httpsPort.URLProtocol)
+	}
+	if httpsPort.SourceService != "gluetun" {
+		t.Errorf("port 8443 SourceService = %q, want gluetun", httpsPort.SourceService)
+	}
+
+	if httpPort == nil {
+		t.Fatal("qbittorrent should have port 8080")
+	}
+	if httpPort.URLProtocol != "http" {
+		t.Errorf("port 8080 URLProtocol = %q, want http", httpPort.URLProtocol)
+	}
+	if httpPort.Label != "Admin" {
+		t.Errorf("port 8080 Label = %q, want Admin", httpPort.Label)
+	}
+	if httpPort.SourceService != "gluetun" {
+		t.Errorf("port 8080 SourceService = %q, want gluetun", httpPort.SourceService)
+	}
+
+	// Check gluetun ports have TargetService set
+	gluetun := svcMap["gluetun"]
+	for _, port := range gluetun.Ports {
+		if port.TargetService != "qbittorrent" {
+			t.Errorf("gluetun port %d should have TargetService=qbittorrent, got %q", port.HostPort, port.TargetService)
+		}
+		// Original protocol should still be preserved on source
+		if port.HostPort == 8443 && port.URLProtocol != "https" {
+			t.Errorf("gluetun port 8443 should still have URLProtocol=https, got %q", port.URLProtocol)
+		}
+	}
+}
+
 // TestLogFlushHandler_MethodNotAllowed tests that GET is rejected.
 func TestLogFlushHandler_MethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/logs/flush", nil)

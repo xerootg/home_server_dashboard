@@ -293,7 +293,27 @@ The dashboard reads custom labels from Docker containers to customize visibility
 | `home.server.dashboard.ports.hidden` | Comma-separated port numbers to hide (e.g., `8080,9000`) |
 | `home.server.dashboard.ports.<port>.label` | Custom label for a specific port |
 | `home.server.dashboard.ports.<port>.hidden` | Set to `true` to hide a specific port |
+| `home.server.dashboard.ports.<port>.protocol` | Set port link protocol to `http` or `https` (default: `http`) |
 | `home.server.dashboard.remapport.<port>` | Remap a port to another service (for containers sharing network namespace) |
+
+**Protocol Override:** By default, port links use `http://`. Set the protocol label to `https` for services with TLS/SSL enabled. Works with both direct ports and remapped ports:
+
+```yaml
+services:
+  traefik:
+    labels:
+      home.server.dashboard.ports.8443.protocol: "https"  # Opens https://host:8443
+  
+  gluetun:
+    ports:
+      - "9091:9091"
+    labels:
+      home.server.dashboard.ports.9091.protocol: "https"  # Protocol preserved when remapped
+      home.server.dashboard.remapport.9091: firefox
+  
+  firefox:
+    network_mode: "service:gluetun"  # Gets https://gluetun-ip:9091 link
+```
 
 **Port Remapping:** For containers that share a network namespace (e.g., services running through a VPN container like gluetun), use `remapport` to show the port on the correct service:
 
@@ -318,6 +338,7 @@ services:
     labels:
       home.server.dashboard.description: "My application"
       home.server.dashboard.ports.8080.label: "Admin Panel"
+      home.server.dashboard.ports.8080.protocol: "https"
       home.server.dashboard.ports.9000.hidden: "true"
 ```
 ### Watchtower Integration

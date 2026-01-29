@@ -132,6 +132,51 @@ describe('renderPorts', () => {
         assert(result.includes('qbittorrent'), 'Should include target service name');
         assert(result.includes('Admin'), 'Should include labeled port');
     });
+
+    it('uses custom https protocol when url_protocol is set', () => {
+        const ports = [
+            { host_port: 8443, protocol: 'tcp', url_protocol: 'https' }
+        ];
+        const result = renderPorts(ports, '192.168.1.1', {});
+        assert(result.includes('https://192.168.1.1:8443'), 'Should use https protocol');
+    });
+
+    it('uses custom http protocol when url_protocol is set explicitly', () => {
+        const ports = [
+            { host_port: 8080, protocol: 'tcp', url_protocol: 'http' }
+        ];
+        const result = renderPorts(ports, '192.168.1.1', {});
+        assert(result.includes('http://192.168.1.1:8080'), 'Should use http protocol');
+    });
+
+    it('defaults to http when url_protocol is not set', () => {
+        const ports = [
+            { host_port: 8080, protocol: 'tcp' }
+        ];
+        const result = renderPorts(ports, '192.168.1.1', {});
+        assert(result.includes('http://192.168.1.1:8080'), 'Should default to http');
+    });
+
+    it('uses custom protocol with labeled port', () => {
+        const ports = [
+            { host_port: 8443, protocol: 'tcp', label: 'Admin Panel', url_protocol: 'https' }
+        ];
+        const result = renderPorts(ports, '192.168.1.1', {});
+        assert(result.includes('https://192.168.1.1:8443'), 'Should use https with labeled port');
+        assert(result.includes('Admin Panel'), 'Should include label');
+    });
+
+    it('uses custom protocol with source_service port', () => {
+        servicesState.all = [
+            { name: 'gluetun', host: 'nas', host_ip: '192.168.1.10' }
+        ];
+        const ports = [
+            { host_port: 8443, protocol: 'tcp', source_service: 'gluetun', url_protocol: 'https' }
+        ];
+        const service = { name: 'qbittorrent', host: 'nas' };
+        const result = renderPorts(ports, '192.168.1.10', service);
+        assert(result.includes('https://192.168.1.10:8443'), 'Should use https for source service port');
+    });
 });
 
 describe('renderTraefikURLs', () => {
